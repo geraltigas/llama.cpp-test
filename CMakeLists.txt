@@ -91,7 +91,7 @@ set(LLAMA_CUDA_KQUANTS_ITER "2" CACHE STRING "llama: iters./thread per block for
 set(LLAMA_CUDA_PEER_MAX_BATCH_SIZE "128" CACHE STRING
                                              "llama: max. batch size for using peer access")
 option(LLAMA_HIPBLAS                         "llama: use hipBLAS"                               OFF)
-option(LLAMA_CLBLAST                         "llama: use CLBlast"                               OFF)
+option(LLAMA_CLBLAST                         "llama: use CLBlast"                               ON)
 option(LLAMA_METAL                           "llama: use Metal"                                 ${LLAMA_METAL_DEFAULT})
 option(LLAMA_METAL_NDEBUG                    "llama: disable Metal debugging"                   OFF)
 option(LLAMA_MPI                             "llama: use MPI"                                   OFF)
@@ -345,7 +345,11 @@ if (LLAMA_MPI)
 endif()
 
 if (LLAMA_CLBLAST)
+#    E:\software\vcpkg\installed\x64-windows\share\clblast
+    set(CLBlast_DIR "E:/software/vcpkg/installed/x64-windows/share/clblast")
+#    find_package(CLBlast CONFIG REQUIRED)
     find_package(CLBlast)
+# set ddl path
     if (CLBlast_FOUND)
         message(STATUS "CLBlast found")
 
@@ -355,6 +359,7 @@ if (LLAMA_CLBLAST)
         add_compile_definitions(GGML_USE_CLBLAST)
 
         set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} clblast)
+
     else()
         message(WARNING "CLBlast not found")
     endif()
@@ -709,6 +714,11 @@ if (GGML_USE_CPU_HBM)
     find_library(memkind memkind REQUIRED)
 endif()
 
+add_library(time_record OBJECT
+        time_record.cpp
+        time_record.h
+)
+
 add_library(ggml OBJECT
             ggml.c
             ggml.h
@@ -723,11 +733,12 @@ add_library(ggml OBJECT
             ${GGML_SOURCES_METAL}  ${GGML_HEADERS_METAL}
             ${GGML_SOURCES_MPI}    ${GGML_HEADERS_MPI}
             ${GGML_SOURCES_EXTRA}  ${GGML_HEADERS_EXTRA}
-            )
+)
+
 
 target_include_directories(ggml PUBLIC . ${LLAMA_EXTRA_INCLUDES})
 target_compile_features(ggml PUBLIC c_std_11) # don't bump
-target_link_libraries(ggml PUBLIC Threads::Threads ${LLAMA_EXTRA_LIBS})
+target_link_libraries(ggml PUBLIC Threads::Threads time_record ${LLAMA_EXTRA_LIBS})
 if (GGML_USE_CPU_HBM)
     target_link_libraries(ggml PUBLIC memkind)
 endif()
@@ -736,7 +747,7 @@ add_library(ggml_static STATIC $<TARGET_OBJECTS:ggml>)
 if (BUILD_SHARED_LIBS)
     set_target_properties(ggml PROPERTIES POSITION_INDEPENDENT_CODE ON)
     add_library(ggml_shared SHARED $<TARGET_OBJECTS:ggml>)
-    target_link_libraries(ggml_shared PUBLIC Threads::Threads ${LLAMA_EXTRA_LIBS})
+    target_link_libraries(ggml_shared PUBLIC Threads::Threads time_record ${LLAMA_EXTRA_LIBS})
     install(TARGETS ggml_shared LIBRARY)
 endif()
 
@@ -751,6 +762,7 @@ target_include_directories(llama PUBLIC .)
 target_compile_features(llama PUBLIC cxx_std_11) # don't bump
 target_link_libraries(llama PRIVATE
     ggml
+        time_record
     ${LLAMA_EXTRA_LIBS}
     )
 

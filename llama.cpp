@@ -6,6 +6,7 @@
 #include "ggml.h"
 
 #include "ggml-alloc.h"
+#include "time_record.h"
 
 #ifdef GGML_USE_CUBLAS
 #  include "ggml-cuda.h"
@@ -9239,6 +9240,7 @@ bool llama_mlock_supported(void) {
 void llama_backend_init(bool numa) {
     ggml_time_init();
 
+
     // needed to initialize f16 tables
     {
         struct ggml_init_params params = { 0, NULL, false };
@@ -9259,6 +9261,7 @@ void llama_backend_free(void) {
 #ifdef GGML_USE_MPI
     ggml_mpi_backend_free();
 #endif
+    print_time_record();
 }
 
 int64_t llama_time_us(void) {

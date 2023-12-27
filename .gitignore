@@ -102,3 +102,9 @@ poetry.toml
 /tests/test-tokenizer-1-bpe
 /tests/test-rope
 /tests/test-backend-ops
+
+.idea
+
+cmake-build-debug-visual-studio/
+cmake-build-debug-remote-host/
+cmake-build-debug/
