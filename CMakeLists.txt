@@ -352,7 +352,10 @@ if (LLAMA_CLBLAST)
     set(CLBlast_DIR "E:/software/vcpkg/installed/x64-windows/share/clblast")
 #    find_package(CLBlast CONFIG REQUIRED)
     find_package(CLBlast)
-# set ddl path
+    # E:\software\oneAPI\compiler\2024.0\include\sycl
+    include_directories("E:/software/oneAPI/compiler/2024.0/include/sycl")
+    # E:\software\oneAPI\compiler\2024.0\bin\OpenCL.dll
+    #message(STATUS "OpenCL_INCLUDE_DIRS: ${OpenCL_INCLUDE_DIRS}")
     set(GFLAGS_USE_TARGET_NAMESPACE ON)
     # find glog
     set(glog_DIR "E:/software/vcpkg/installed/x64-windows/share/glog")
@@ -360,12 +363,18 @@ if (LLAMA_CLBLAST)
     if (CLBlast_FOUND)
         message(STATUS "CLBlast found")
 
+#        add_library(my_opencl OBJECT my_opencl.cpp my_opencl.h)
+#        target_link_libraries(my_opencl PRIVATE glog::glog)
+#
+#        #glog include "E:/software/vcpkg/installed/x64-windows/include"
+#        include_directories(. "E:/software/vcpkg/installed/x64-windows/include")
+
         set(GGML_HEADERS_OPENCL ggml-opencl.h my_opencl.h)
         set(GGML_SOURCES_OPENCL ggml-opencl.cpp my_opencl.cpp)
 
         add_compile_definitions(GGML_USE_CLBLAST)
 
-        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} clblast glog::glog)
+        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} "E:/software/oneAPI/2024.0/lib/OpenCL.lib" clblast glog::glog)
 
     else()
         message(WARNING "CLBlast not found")

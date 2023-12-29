@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include "my_opencl.h"
+
 #if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
 #include <signal.h>
 #include <unistd.h>
@@ -107,6 +109,7 @@ static void llama_log_callback_logTee(ggml_log_level level, const char * text, v
 }
 
 int main(int argc, char ** argv) {
+    init_logging(argv[0]);
     gpt_params params;
     g_params = &params;
 

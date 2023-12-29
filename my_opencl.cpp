@@ -16,11 +16,12 @@
         exit(EXIT_FAILURE); \
     }
 
-static cl_platform_id _global_platform;
-static cl_device_id _global_device;
-static cl_context _global_context;
-static cl_command_queue _global_queue;
-static cl_program _global_program;
+bool fp16_support;
+cl_platform_id _global_platform;
+cl_device_id _global_device;
+cl_context _global_context;
+cl_command_queue _global_queue;
+cl_program _global_program;
 // buffers set
 static std::set<cl_mem> _global_buffers;
 // kernel map, key is kernel name, value is kernel
@@ -29,7 +30,7 @@ static std::map<std::string, cl_kernel> _global_kernels;
 char* platform_name = "Intel(R) OpenCL HD Graphics";
 //"NVIDIA CUDA";
 char* device_name = "Intel(R) UHD Graphics";
-    //"NVIDIA GeForce RTX 2060";
+//"NVIDIA GeForce RTX 2060";
 char* kernels_file = "../kernels.cl";
 
 
@@ -72,7 +73,9 @@ void print_gpus() {
     CHECK_ERROR(err, "Failed to get platform IDs")
     for (unsigned int i = 0; i < numPlatforms; i++) {
         err = clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_GPU, 0, nullptr, &numDevices);
-        CHECK_ERROR(err, "Failed to get device IDs")
+        if (err != CL_SUCCESS) {
+            continue;
+        }
         devices = (cl_device_id *)malloc(sizeof(cl_device_id) * numDevices);
         err = clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_GPU, numDevices, devices, nullptr);
         CHECK_ERROR(err, "Failed to get device IDs")
@@ -144,6 +147,15 @@ void set_platform_and_device() {
     auto tuple = get_platform_and_device(platform_name, device_name);
     _global_platform = std::get<0>(tuple);
     _global_device = std::get<1>(tuple);
+
+    size_t ext_str_size;
+    clGetDeviceInfo(_global_device, CL_DEVICE_EXTENSIONS, 0, NULL, &ext_str_size);
+    char *ext_buffer = (char *)alloca(ext_str_size + 1);
+    clGetDeviceInfo(_global_device, CL_DEVICE_EXTENSIONS, ext_str_size, ext_buffer, NULL);
+    ext_buffer[ext_str_size] = '\0'; // ensure it is null terminated
+    // Check if ext_buffer contains cl_khr_fp16
+    fp16_support = strstr(ext_buffer, "cl_khr_fp16") != NULL;
+    fprintf(stderr, "ggml_opencl: device FP16 support: %s\n", fp16_support ? "true" : "false");
 }
 
 void setup_opencl_env() {
@@ -152,9 +164,13 @@ void setup_opencl_env() {
         LOG(ERROR) << "Platform or device is not initialized" << std::endl;
         exit(EXIT_FAILURE);
     }
+    cl_context_properties properties[] = {
+        (intptr_t)CL_CONTEXT_PLATFORM, (intptr_t)_global_platform, 0
+    };
     // init context and queue
     cl_int err;
-    _global_context = clCreateContext(nullptr, 1, &_global_device, nullptr, nullptr, &err);
+    _global_context = clCreateContext(properties, 1, &_global_device, NULL, NULL, &err);
+        // clCreateContext(nullptr, 1, &_global_device, nullptr, nullptr, &err);
     CHECK_ERROR(err, "Failed to create context")
     _global_queue = clCreateCommandQueueWithProperties(_global_context, _global_device, nullptr, &err);
     CHECK_ERROR(err, "Failed to create command queue")
@@ -194,7 +210,6 @@ void write_buffer(const cl_mem buffer, const size_t size, const void* host_ptr) 
     cl_int err = clEnqueueWriteBuffer(_global_queue, buffer, CL_TRUE, 0, size, host_ptr, 0, nullptr, nullptr);
     CHECK_ERROR(err, "Failed to write buffer")
 }
-
 
 void build_all_kernels() {
     cl_int err;
@@ -244,6 +259,14 @@ void build_all_kernels() {
         CHECK_ERROR(err, "Failed to get kernel name")
         _global_kernels[kernel_name] = kernels[i];
     }
+}
+
+void add_kernel(const char* kernel_name, cl_kernel kernel) {
+    if (_global_kernels.find(kernel_name) != _global_kernels.end()) {
+        LOG(ERROR) << "Kernel " << kernel_name << " already exists" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    _global_kernels[kernel_name] = kernel;
 }
 
 cl_kernel get_kernel(const char* kernel_name) {

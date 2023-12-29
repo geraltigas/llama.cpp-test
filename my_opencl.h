@@ -5,6 +5,13 @@
 #include <CL/cl.h>
 #ifndef PRINT_INFO_H
 
+extern bool fp16_support;
+extern cl_platform_id _global_platform;
+extern cl_device_id _global_device;
+extern cl_context _global_context;
+extern cl_command_queue _global_queue;
+extern cl_program _global_program;
+
 enum class buffer_type {
     READ_ONLY,
     WRITE_ONLY,
@@ -24,6 +31,7 @@ cl_mem create_buffer(const buffer_type buffer_type, const size_t size, void* hos
 void write_buffer(const cl_mem buffer, const size_t size, const void* host_ptr);
 void build_all_kernels();
 cl_kernel get_kernel(const char* kernel_name);
+void add_kernel(const char* kernel_name, cl_kernel kernel);
 void set_kernel_arg(cl_kernel kernel, cl_uint arg_index, size_t arg_size, const void* arg_value);
 void run_kernel(cl_kernel kernel, const size_t global_size, const size_t local_size);
 void read_buffer(const cl_mem buffer, const size_t size, void* host_ptr);
