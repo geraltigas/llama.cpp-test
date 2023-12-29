@@ -5,28 +5,51 @@
 #include <map>
 #include <string>
 #include "time_record.h"
+#include <mutex>
 
 // declare a map to store the time record
 // key: name of the timer
 // value: time of the timer
 std::map<std::string, double> time_record;
 std::map<std::string, double> delta_time_record;
+// make this thread safe
+std::mutex time_record_mutex;
+std::mutex delta_time_record_mutex;
 
 void init_time_record() {
     time_record.clear();
 }
+// make this thread safe
 void record_time(const char * name, double time) {
-    time_record[name] = time;
+    // time_record[name] = time;
+
+    time_record_mutex.lock();
+    time_record[name] = time_record[name] + time;
+    time_record_mutex.unlock();
+
 }
 void start_named_timer(const char * name) {
+
+    delta_time_record_mutex.lock();
     delta_time_record[name] = clock();
+    delta_time_record_mutex.unlock();
+
 }
 void stop_named_timer_and_record(const char * name) {
-    double delta_time = (clock() - delta_time_record[name]) / (double)CLOCKS_PER_SEC;
+
+    delta_time_record_mutex.lock();
+    time_record_mutex.lock();
+    double delta_time = (clock() - delta_time_record[name])  * 1000 / (double)CLOCKS_PER_SEC;
     time_record[name] = time_record[name] + delta_time;
+    time_record_mutex.unlock();
+    delta_time_record_mutex.unlock();
 }
 void clear_time_record() {
+
+    time_record_mutex.lock();
     time_record.clear();
+    time_record_mutex.unlock();
+
 }
 void print_time_record() {
     double total_time = 0;

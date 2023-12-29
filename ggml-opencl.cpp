@@ -9,8 +9,12 @@
 #include <limits>
 #include <sstream>
 #include <vector>
+#include <my_opencl.h>
 
-#define CL_TARGET_OPENCL_VERSION 110
+extern char *platform_name;
+extern char *device_name;
+
+// #define CL_TARGET_OPENCL_VERSION 110
 #include <clblast.h>
 
 #if defined(_MSC_VER)
@@ -1004,8 +1008,13 @@ void ggml_cl_init(void) {
         exit(1);
     }
 
-    char * user_platform_string = getenv("GGML_OPENCL_PLATFORM");
-    char * user_device_string = getenv("GGML_OPENCL_DEVICE");
+    print_platforms();
+    print_gpus();
+
+    char * user_platform_string = platform_name;
+        //getenv("GGML_OPENCL_PLATFORM");
+    char * user_device_string = device_name;
+        //getenv("GGML_OPENCL_DEVICE");
     int user_platform_number = -1;
     int user_device_number = -1;
 

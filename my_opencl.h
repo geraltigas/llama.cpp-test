@@ -1,0 +1,35 @@
+//
+// Created by jb030 on 28/12/2023.
+//
+
+#include <CL/cl.h>
+#ifndef PRINT_INFO_H
+
+enum class buffer_type {
+    READ_ONLY,
+    WRITE_ONLY,
+    READ_WRITE
+};
+
+void init_logging(const char* argv0);
+void print_platforms();
+void print_gpus();
+void print_now_using(cl_platform_id platform, cl_device_id device);
+void print_now_using();
+// return multiple values: platform and device, function name is get_platform_and_device(const char *platform_name, const char *device_name)
+std::tuple<cl_platform_id, cl_device_id> get_platform_and_device(const char *platform_name, const char *device_name);
+void set_platform_and_device();
+void setup_opencl_env();
+cl_mem create_buffer(const buffer_type buffer_type, const size_t size, void* host_ptr);
+void write_buffer(const cl_mem buffer, const size_t size, const void* host_ptr);
+void build_all_kernels();
+cl_kernel get_kernel(const char* kernel_name);
+void set_kernel_arg(cl_kernel kernel, cl_uint arg_index, size_t arg_size, const void* arg_value);
+void run_kernel(cl_kernel kernel, const size_t global_size, const size_t local_size);
+void read_buffer(const cl_mem buffer, const size_t size, void* host_ptr);
+void release_opencl_env();
+
+
+#define PRINT_INFO_H
+
+#endif //PRINT_INFO_H

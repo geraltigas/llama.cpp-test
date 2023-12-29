@@ -8,7 +8,6 @@
 extern "C" {
 #endif
 
-
     void init_time_record();
     void record_time(const char * name, double time);
     void start_named_timer(const char * name);

@@ -353,15 +353,19 @@ if (LLAMA_CLBLAST)
 #    find_package(CLBlast CONFIG REQUIRED)
     find_package(CLBlast)
 # set ddl path
+    set(GFLAGS_USE_TARGET_NAMESPACE ON)
+    # find glog
+    set(glog_DIR "E:/software/vcpkg/installed/x64-windows/share/glog")
+    find_package(glog REQUIRED)
     if (CLBlast_FOUND)
         message(STATUS "CLBlast found")
 
-        set(GGML_HEADERS_OPENCL ggml-opencl.h)
-        set(GGML_SOURCES_OPENCL ggml-opencl.cpp)
+        set(GGML_HEADERS_OPENCL ggml-opencl.h my_opencl.h)
+        set(GGML_SOURCES_OPENCL ggml-opencl.cpp my_opencl.cpp)
 
         add_compile_definitions(GGML_USE_CLBLAST)
 
-        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} clblast)
+        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} clblast glog::glog)
 
     else()
         message(WARNING "CLBlast not found")
