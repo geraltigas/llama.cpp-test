@@ -27,9 +27,9 @@ static std::set<cl_mem> _global_buffers;
 // kernel map, key is kernel name, value is kernel
 static std::map<std::string, cl_kernel> _global_kernels;
 
-char* platform_name = "Intel(R) OpenCL HD Graphics";
+char* platform_name = "Intel(R) OpenCL Graphics";
 //"NVIDIA CUDA";
-char* device_name = "Intel(R) UHD Graphics";
+char* device_name = "Intel(R) UHD Graphics 770";
 //"NVIDIA GeForce RTX 2060";
 char* kernels_file = "../kernels.cl";
 
@@ -37,7 +37,7 @@ char* kernels_file = "../kernels.cl";
 void init_logging(const char* argv0) {
     google::InitGoogleLogging(argv0);
     // level INFO
-    FLAGS_logtostdout = true;
+    FLAGS_logtostderr = true;
     FLAGS_minloglevel = 0;
 }
 

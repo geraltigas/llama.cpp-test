@@ -92,7 +92,6 @@ set(LLAMA_CUDA_PEER_MAX_BATCH_SIZE "128" CACHE STRING
                                              "llama: max. batch size for using peer access")
 option(LLAMA_HIPBLAS                         "llama: use hipBLAS"                               OFF)
 option(LLAMA_CLBLAST                         "llama: use CLBlast"                               ON)
-option(LLAMA_HIP_UMA                         "llama: use HIP unified memory architecture"       OFF)
 option(LLAMA_METAL                           "llama: use Metal"                                 ${LLAMA_METAL_DEFAULT})
 option(LLAMA_METAL_NDEBUG                    "llama: disable Metal debugging"                   OFF)
 option(LLAMA_MPI                             "llama: use MPI"                                   OFF)
@@ -302,8 +301,6 @@ if (LLAMA_CUBLAS)
             set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} CUDA::cudart CUDA::cublas CUDA::cublasLt)
         endif()
 
-        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} CUDA::cuda_driver)
-
     if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
         # 52 == lowest CUDA 12 standard
         # 60 == f16 CUDA intrinsics
@@ -348,36 +345,26 @@ if (LLAMA_MPI)
 endif()
 
 if (LLAMA_CLBLAST)
-#    E:\software\vcpkg\installed\x64-windows\share\clblast
-    set(CLBlast_DIR "E:/software/vcpkg/installed/x64-windows/share/clblast")
-#    find_package(CLBlast CONFIG REQUIRED)
     find_package(CLBlast)
-    # E:\software\oneAPI\compiler\2024.0\include\sycl
-    include_directories("E:/software/oneAPI/compiler/2024.0/include/sycl")
-    # E:\software\oneAPI\compiler\2024.0\bin\OpenCL.dll
-    #message(STATUS "OpenCL_INCLUDE_DIRS: ${OpenCL_INCLUDE_DIRS}")
-    set(GFLAGS_USE_TARGET_NAMESPACE ON)
-    # find glog
-    set(glog_DIR "E:/software/vcpkg/installed/x64-windows/share/glog")
-    find_package(glog REQUIRED)
     if (CLBlast_FOUND)
         message(STATUS "CLBlast found")
-
-#        add_library(my_opencl OBJECT my_opencl.cpp my_opencl.h)
-#        target_link_libraries(my_opencl PRIVATE glog::glog)
-#
-#        #glog include "E:/software/vcpkg/installed/x64-windows/include"
-#        include_directories(. "E:/software/vcpkg/installed/x64-windows/include")
 
         set(GGML_HEADERS_OPENCL ggml-opencl.h my_opencl.h)
         set(GGML_SOURCES_OPENCL ggml-opencl.cpp my_opencl.cpp)
 
         add_compile_definitions(GGML_USE_CLBLAST)
 
-        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} "E:/software/oneAPI/2024.0/lib/OpenCL.lib" clblast glog::glog)
-
+        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} clblast)
     else()
         message(WARNING "CLBlast not found")
+    endif()
+
+    find_package(glog)
+    if (glog_FOUND)
+        message(STATUS "glog found")
+        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} glog::glog)
+    else()
+        message(WARNING "glog not found")
     endif()
 endif()
 
@@ -398,9 +385,6 @@ if (LLAMA_HIPBLAS)
     if (${hipblas_FOUND} AND ${hip_FOUND})
         message(STATUS "HIP and hipBLAS found")
         add_compile_definitions(GGML_USE_HIPBLAS GGML_USE_CUBLAS)
-        if (LLAMA_HIP_UMA)
-            add_compile_definitions(GGML_HIP_UMA)
-        endif()
         add_library(ggml-rocm OBJECT ggml-cuda.cu ggml-cuda.h)
         if (BUILD_SHARED_LIBS)
             set_target_properties(ggml-rocm PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -733,11 +717,6 @@ if (GGML_USE_CPU_HBM)
     find_library(memkind memkind REQUIRED)
 endif()
 
-add_library(time_record OBJECT
-        time_record.cpp
-        time_record.h
-)
-
 add_library(ggml OBJECT
             ggml.c
             ggml.h
@@ -747,17 +726,18 @@ add_library(ggml OBJECT
             ggml-backend.h
             ggml-quants.c
             ggml-quants.h
+            time_record.h
+            time_record.cpp
             ${GGML_SOURCES_CUDA}   ${GGML_HEADERS_CUDA}
             ${GGML_SOURCES_OPENCL} ${GGML_HEADERS_OPENCL}
             ${GGML_SOURCES_METAL}  ${GGML_HEADERS_METAL}
             ${GGML_SOURCES_MPI}    ${GGML_HEADERS_MPI}
             ${GGML_SOURCES_EXTRA}  ${GGML_HEADERS_EXTRA}
-)
-
+            )
 
 target_include_directories(ggml PUBLIC . ${LLAMA_EXTRA_INCLUDES})
 target_compile_features(ggml PUBLIC c_std_11) # don't bump
-target_link_libraries(ggml PUBLIC Threads::Threads time_record ${LLAMA_EXTRA_LIBS})
+target_link_libraries(ggml PUBLIC Threads::Threads ${LLAMA_EXTRA_LIBS})
 if (GGML_USE_CPU_HBM)
     target_link_libraries(ggml PUBLIC memkind)
 endif()
@@ -766,7 +746,7 @@ add_library(ggml_static STATIC $<TARGET_OBJECTS:ggml>)
 if (BUILD_SHARED_LIBS)
     set_target_properties(ggml PROPERTIES POSITION_INDEPENDENT_CODE ON)
     add_library(ggml_shared SHARED $<TARGET_OBJECTS:ggml>)
-    target_link_libraries(ggml_shared PUBLIC Threads::Threads time_record ${LLAMA_EXTRA_LIBS})
+    target_link_libraries(ggml_shared PUBLIC Threads::Threads ${LLAMA_EXTRA_LIBS})
     install(TARGETS ggml_shared LIBRARY)
 endif()
 
@@ -781,7 +761,6 @@ target_include_directories(llama PUBLIC .)
 target_compile_features(llama PUBLIC cxx_std_11) # don't bump
 target_link_libraries(llama PRIVATE
     ggml
-        time_record
     ${LLAMA_EXTRA_LIBS}
     )
 
