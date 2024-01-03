@@ -9700,11 +9700,15 @@ static void ggml_compute_forward_mul_mat(
     const struct ggml_tensor* src0,
     const struct ggml_tensor* src1,
     struct ggml_tensor* dst) {
+
+    start_named_timer("_opencl_mul_mat_before_opencl1");
     int64_t t0 = ggml_perf_time_us();
     UNUSED(t0);
 
     GGML_TENSOR_BINARY_OP_LOCALS
+    stop_named_timer_and_record("_opencl_mul_mat_before_opencl1");
 
+    start_named_timer("_opencl_mul_mat_before_opencl2");
     const int ith = params->ith;
     const int nth = params->nth;
 
@@ -9716,6 +9720,9 @@ static void ggml_compute_forward_mul_mat(
     enum ggml_type const vec_dot_type = type_traits[type].vec_dot_type;
     ggml_from_float_t const from_float_to_vec_dot = type_traits[vec_dot_type].from_float;
 
+    stop_named_timer_and_record("_opencl_mul_mat_before_opencl2");
+
+    start_named_timer("_opencl_mul_mat_before_opencl3");
     GGML_ASSERT(ne0 == ne01);
     GGML_ASSERT(ne1 == ne11);
     GGML_ASSERT(ne2 == ne12);
@@ -9738,8 +9745,12 @@ static void ggml_compute_forward_mul_mat(
     // nb01 >= nb00 - src0 is not transposed
     //   compute by src0 rows
 
+    stop_named_timer_and_record("_opencl_mul_mat_before_opencl3");
+
 #if defined(GGML_USE_CLBLAST)
+    start_named_timer("_opencl_can_mul_mat");
     if (ggml_cl_can_mul_mat(src0, src1, dst)) {
+        stop_named_timer_and_record("_opencl_can_mul_mat");
         if (params->ith == 0 && params->type == GGML_TASK_COMPUTE) {
             ggml_cl_mul_mat(src0, src1, dst, params->wdata, params->wsize);
         }

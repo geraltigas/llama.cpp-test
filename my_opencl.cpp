@@ -17,6 +17,7 @@
     }
 
 bool fp16_support;
+bool unified_memory_support;
 cl_platform_id _global_platform;
 cl_device_id _global_device;
 cl_context _global_context;
@@ -104,6 +105,21 @@ void print_now_using() {
     print_now_using(_global_platform, _global_device);
 }
 
+void check_unified_memory_support() {
+    cl_bool unifiedMemory;
+    cl_int err;
+
+    // 获取设备的统一内存属性
+    err = clGetDeviceInfo(_global_device, CL_DEVICE_HOST_UNIFIED_MEMORY, sizeof(cl_bool), &unifiedMemory, NULL);
+    if (err != CL_SUCCESS) {
+        // 错误处理
+        printf("Error getting device info: %d\n", err);
+        unified_memory_support = false;
+    }else {
+        unified_memory_support = (unifiedMemory == CL_TRUE);
+    }
+}
+
 std::tuple<cl_platform_id, cl_device_id> get_platform_and_device(const char* platform_name, const char* device_name) {
     LOG(INFO) << "Get Platform and Device:" << std::endl;
     cl_int err;
@@ -155,7 +171,11 @@ void set_platform_and_device() {
     ext_buffer[ext_str_size] = '\0'; // ensure it is null terminated
     // Check if ext_buffer contains cl_khr_fp16
     fp16_support = strstr(ext_buffer, "cl_khr_fp16") != NULL;
-    fprintf(stderr, "ggml_opencl: device FP16 support: %s\n", fp16_support ? "true" : "false");
+    LOG(INFO) << "Device fp16 support: " << (fp16_support ? "true" : "false") << std::endl;
+
+    // check unified memory support
+    check_unified_memory_support();
+    LOG(INFO) << "Device unified memory support: " << (unified_memory_support ? "true" : "false") << std::endl;
 }
 
 void setup_opencl_env() {

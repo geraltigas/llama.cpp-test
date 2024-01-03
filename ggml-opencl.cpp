@@ -10,6 +10,9 @@
 #include <sstream>
 #include <vector>
 #include <my_opencl.h>
+#include <time_record.h>
+// glog
+#include <glog/logging.h>
 
 extern char *platform_name;
 extern char *device_name;
@@ -1466,6 +1469,7 @@ static void ggml_cl_mul_mat_f16(const ggml_tensor * src0, const ggml_tensor * sr
 }
 
 static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
+    start_named_timer("_opencl_mul_mat_q_f32_init");
     const int64_t ne00 = src0->ne[0];
     const int64_t ne01 = src0->ne[1];
     const int64_t ne02 = src0->ne[2];
@@ -1480,6 +1484,13 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     const int nb3  = dst->nb[3];
     const ggml_type type = src0->type;
     const bool mul_mat_vec = ne11 == 1 && ne00%2 == 0;
+    if (mul_mat_vec) {
+        increase_counter("_opencl_mul_mat_vec_q_f32_mul_mat_vec");
+        start_named_timer("_opencl_mul_mat_vec_q_f32_mul_mat_vec");
+    }else {
+        increase_counter("_opencl_mul_mat_vec_q_f32_mul_mat_mat");
+        start_named_timer("_opencl_mul_mat_vec_q_f32_mul_mat_mat");
+    }
 
     const int64_t r2 = ne12 / ne02;
     const int64_t r3 = ne13 / ne03;
@@ -1492,6 +1503,9 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     const int x_bps = x_ne / ggml_blck_size(type); // blocks per 2D slice
     const size_t q_sz = ggml_type_size(type) * x_bps;
 
+    stop_named_timer_and_record("_opencl_mul_mat_q_f32_init");
+
+    start_named_timer("_opencl_mul_mat_q_f32_mem_alloc");
     size_t x_size;
     size_t y_size;
     size_t d_size;
@@ -1507,6 +1521,9 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
         d_Q = ggml_cl_pool_malloc(q_sz, &q_size);
     }
 
+    stop_named_timer_and_record("_opencl_mul_mat_q_f32_mem_alloc");
+
+    start_named_timer("_opencl_mul_mat_q_f32_get_kernels");
     cl_kernel to_fp32_cl = ggml_get_to_fp32_cl(type);
     cl_kernel dmmv = ggml_get_dequantize_mul_mat_vec_cl(type);
 
@@ -1515,6 +1532,12 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
 
     size_t ev_idx = 0;
     std::vector<cl_event> events;
+
+    stop_named_timer_and_record("_opencl_mul_mat_q_f32_get_kernels");
+
+    start_named_timer("_opencl_mul_mat_q_f32_compute");
+    // LOG(INFO) << ne00 << " " << ne01 << " " << ne10 << " " << ne11 << std::endl;
+    // I20240103 11:00:36.179787 13220 ggml-opencl.cpp:1532] 2560 7680 2560 2
 
     for (int64_t i03 = 0; i03 < ne03; i03++) {
         // TODO: copy and dequantize src0 here when r3>1
@@ -1593,7 +1616,9 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
             }
         }
     }
+    stop_named_timer_and_record("_opencl_mul_mat_q_f32_compute");
 
+    start_named_timer("_opencl_mul_mat_q_f32_mem_free");
     if (!mul_mat_vec) {
         ggml_cl_pool_free(d_X, x_size);
     }
@@ -1601,6 +1626,13 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     ggml_cl_pool_free(d_D, d_size);
     if (src0->backend == GGML_BACKEND_CPU) {
         ggml_cl_pool_free(d_Q, q_size);
+    }
+    stop_named_timer_and_record("_opencl_mul_mat_q_f32_mem_free");
+    if (mul_mat_vec) {
+        stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_mul_mat_vec");
+    }
+    else {
+        stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_mul_mat_mat");
     }
 }
 
@@ -1646,11 +1678,15 @@ void ggml_cl_mul_mat(const struct ggml_tensor * src0, const struct ggml_tensor *
     GGML_ASSERT(ggml_cl_can_mul_mat(src0, src1, dst));
 
     if (src0->type == GGML_TYPE_F32) {
+        start_named_timer("_opencl_mul_mat_f32");
         ggml_cl_mul_mat_f32(src0, src1, dst);
+        stop_named_timer_and_record("_opencl_mul_mat_f32");
     }
     else if (src0->type == GGML_TYPE_F16) {
         if (ggml_cl_mul_mat_use_f16(src0, src1, dst)) {
+            start_named_timer("_opencl_mul_mat_f16");
             ggml_cl_mul_mat_f16(src0, src1, dst, wdata, wsize);
+            stop_named_timer_and_record("_opencl_mul_mat_f16");
         }
         else {
             ggml_cl_mul_mat_q_f32(src0, src1, dst);

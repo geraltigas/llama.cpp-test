@@ -6,6 +6,7 @@
 #ifndef PRINT_INFO_H
 
 extern bool fp16_support;
+extern bool unified_memory_support;
 extern cl_platform_id _global_platform;
 extern cl_device_id _global_device;
 extern cl_context _global_context;
@@ -36,6 +37,7 @@ void set_kernel_arg(cl_kernel kernel, cl_uint arg_index, size_t arg_size, const 
 void run_kernel(cl_kernel kernel, const size_t global_size, const size_t local_size);
 void read_buffer(const cl_mem buffer, const size_t size, void* host_ptr);
 void release_opencl_env();
+void check_unified_memory_support();
 
 
 #define PRINT_INFO_H

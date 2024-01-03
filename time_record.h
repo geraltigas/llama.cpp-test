@@ -4,16 +4,39 @@
 
 #ifndef TIME_RECORD_H
 
+#define ENABLE_TIME_RECORD
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-    void init_time_record();
-    void record_time(const char * name, double time);
-    void start_named_timer(const char * name);
-    void stop_named_timer_and_record(const char * name);
-    void clear_time_record();
-    void print_time_record();
+    void _init_time_record();
+    void _record_time(const char * name, double time);
+    void _start_named_timer(const char * name);
+    void _stop_named_timer_and_record(const char * name);
+    void _clear_time_record();
+    void _print_time_record();
+    void _increase_counter(const char * name);
+
+# ifdef ENABLE_TIME_RECORD
+    #define init_time_record() _init_time_record()
+    #define record_time(name, time) _record_time(name, time)
+    #define start_named_timer(name) _start_named_timer(name)
+    #define stop_named_timer_and_record(name) _stop_named_timer_and_record(name)
+    #define clear_time_record() _clear_time_record()
+    #define print_time_record() _print_time_record()
+    #define increase_counter(name) _increase_counter(name)
+# else
+    #define init_time_record()
+    #define record_time(name, time)
+    #define start_named_timer(name)
+    #define stop_named_timer_and_record(name)
+    #define clear_time_record()
+    #define print_time_record()
+    #define increase_counter(name)
+# endif
+
+
 
 #ifdef __cplusplus
 }
