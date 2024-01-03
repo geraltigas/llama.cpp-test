@@ -1,0 +1,3 @@
+mainGPU: -ngl 35 -m E:\Projects\llama.cpp\models\phi\phi-2.Q5_K_M.gguf --color -c 2048 --temp 0.7 --repeat_penalty 1.1 -n -1 -p "Instruct: Write a 200 words story\nOutput:"
+mainGPU_Short: -ngl 35 -m E:\Projects\llama.cpp\models\phi\phi-2.Q5_K_M.gguf --color -c 2048 --temp 0.7 --repeat_penalty 1.1 -n -1 -p "Instruct: Who are you?\nOutput:"
+mainCPU: -m E:\Projects\llama.cpp\models\phi\phi-2.Q5_K_M.gguf --color -c 2048 --temp 0.7 --repeat_penalty 1.1 -n -1 -p "Instruct: Write a 200 words story\nOutput:"

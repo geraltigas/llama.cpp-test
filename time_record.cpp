@@ -65,6 +65,7 @@ void _stop_named_timer_and_record(const char * name) {
     time_record[name] = time_record[name] + delta_time;
     time_record_mutex.unlock();
     delta_time_record_mutex.unlock();
+
 }
 void _clear_time_record() {
 
@@ -76,6 +77,15 @@ void _clear_time_record() {
     time_record_mutex.unlock();
 
 }
+
+void print_begin_with(const char * prefix) {
+    for (auto it = time_record.begin(); it != time_record.end(); ++it) {
+        if (it->first.find(prefix) == 0) {
+            printf("%s: %.3f, called %d times\n", it->first.c_str(), it->second, record_times[it->first]);
+        }
+    }
+}
+
 void _print_time_record() {
     double total_time = 0;
     std::string max_op_name;
@@ -101,13 +111,7 @@ void _print_time_record() {
     printf("Other time: %.3f\n", other_time);
 
     printf("------ time record\n");
-    // double mul_mat_time = 0;
-    for (auto it = time_record.begin(); it != time_record.end(); ++it) {
-        // if the name start with _
-        if (it->first[0] == '_') {
-            printf("%s: %.3f\n", it->first.c_str(), it->second);
-        }
-    }
+    print_begin_with("_opencl");
     printf("------ counter\n");
     for (auto it = counter.begin(); it != counter.end(); ++it) {
         printf("%s: %d\n", it->first.c_str(), it->second);

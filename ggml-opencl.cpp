@@ -937,6 +937,7 @@ void ggml_cl_init(void) {
     set_platform_and_device();
     setup_opencl_env();
     print_now_using();
+    build_all_kernels();
 
     const std::string kernel_src = generate_kernels();
 
@@ -1118,6 +1119,44 @@ static cl_mem ggml_cl_pool_malloc(size_t size, size_t * actual_size) {
     return mem;
 }
 
+static auto ggml_cl_pool_malloc_with_unified_mem(size_t size, void* ptr) -> cl_mem {
+    cl_int err;
+
+    // int best_i = -1;
+    // size_t best_size = std::numeric_limits<size_t>::max(); //smallest unused buffer that fits our needs
+    // int worst_i = -1;
+    // size_t worst_size = 0; //largest unused buffer seen so far
+    // for (int i = 0; i < MAX_CL_BUFFERS; ++i) {
+    //     cl_buffer &b = g_cl_buffer_pool[i];
+    //     if (b.size > 0 && b.size >= size && b.size < best_size)
+    //     {
+    //         best_i = i;
+    //         best_size = b.size;
+    //     }
+    //     if (b.size > 0 && b.size > worst_size)
+    //     {
+    //         worst_i = i;
+    //         worst_size = b.size;
+    //     }
+    // }
+    // if(best_i!=-1) //found the smallest buffer that fits our needs
+    // {
+    //     cl_buffer& b = g_cl_buffer_pool[best_i];
+    //     cl_mem mem = b.mem;
+    //     *actual_size = b.size;
+    //     b.size = 0;
+    //     return mem;
+    // }
+    // if(worst_i!=-1) //no buffer that fits our needs, resize largest one to save memory
+    // {
+    //     cl_buffer& b = g_cl_buffer_pool[worst_i];
+    //     cl_mem mem = b.mem;
+    //     b.size = 0;
+    //     clReleaseMemObject(mem);
+    // }
+    return clCreateBuffer(_global_context, CL_MEM_USE_HOST_PTR | CL_MEM_READ_WRITE, size, ptr, &err);
+}
+
 static void ggml_cl_pool_free(cl_mem mem, size_t size) {
     scoped_spin_lock lock(g_cl_pool_lock);
 
@@ -1191,6 +1230,30 @@ static cl_int ggml_cl_h2d_tensor_2d(cl_command_queue queue, cl_mem dst, size_t o
     return CL_SUCCESS;
 }
 
+static cl_int ggml_cl_h2d_tensor_2d_with_unified_mem(cl_command_queue queue, cl_mem dst, size_t offset, const struct ggml_tensor * src, uint64_t i3, uint64_t i2, cl_event* ev) {
+    const uint64_t ne0 = src->ne[0];
+    const uint64_t ne1 = src->ne[1];
+    const uint64_t nb2 = src->nb[2];
+    const uint64_t nb3 = src->nb[3];
+    const enum ggml_type type = src->type;
+    const size_t ts = ggml_type_size(type);
+    const size_t bs = ggml_blck_size(type);
+    const uint64_t row_size = ts*ne0/bs;
+
+    const char * x = (const char *) src->data + i2*nb2 + i3*nb3;
+    size_t size = row_size * ne1;
+    const char * start_ptr = x + offset;
+    cl_mem_flags mem_flags = CL_MEM_USE_HOST_PTR | CL_MEM_READ_WRITE;
+    cl_mem new_dst = clCreateBuffer(_global_context, mem_flags, size, (void *)start_ptr, NULL);
+    if (new_dst == NULL) {
+        return CL_MEM_OBJECT_ALLOCATION_FAILURE;
+    }
+    if (dst) {
+        clReleaseMemObject(dst);
+    }
+    dst = new_dst;
+    return CL_SUCCESS;
+}
 
 
 static void ggml_cl_mul_f32(const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
@@ -1469,6 +1532,7 @@ static void ggml_cl_mul_mat_f16(const ggml_tensor * src0, const ggml_tensor * sr
 }
 
 static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
+    // LOG(INFO) << "ggml_cl_mul_mat_q_f32" << std::endl;
     start_named_timer("_opencl_mul_mat_q_f32_init");
     const int64_t ne00 = src0->ne[0];
     const int64_t ne01 = src0->ne[1];
@@ -1480,17 +1544,13 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     const int64_t ne12 = src1->ne[2];
     const int64_t ne13 = src1->ne[3];
 
+    // LOG(INFO) << ne00 << " " << ne01 << " " << ne02 << " " << ne03 << std::endl;
+    // LOG(INFO) << ne10 << " " << ne11 << " " << ne12 << " " << ne13 << std::endl;
+
     const int nb2  = dst->nb[2];
     const int nb3  = dst->nb[3];
     const ggml_type type = src0->type;
     const bool mul_mat_vec = ne11 == 1 && ne00%2 == 0;
-    if (mul_mat_vec) {
-        increase_counter("_opencl_mul_mat_vec_q_f32_mul_mat_vec");
-        start_named_timer("_opencl_mul_mat_vec_q_f32_mul_mat_vec");
-    }else {
-        increase_counter("_opencl_mul_mat_vec_q_f32_mul_mat_mat");
-        start_named_timer("_opencl_mul_mat_vec_q_f32_mul_mat_mat");
-    }
 
     const int64_t r2 = ne12 / ne02;
     const int64_t r3 = ne13 / ne03;
@@ -1511,15 +1571,15 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     size_t d_size;
     size_t q_size;
     cl_mem d_X;
+    cl_mem _d_X;
     if (!mul_mat_vec) {
         d_X = ggml_cl_pool_malloc(sizeof(float) * x_ne, &x_size);
     }
     cl_mem d_Y = ggml_cl_pool_malloc(sizeof(float) * y_ne, &y_size);
     cl_mem d_D = ggml_cl_pool_malloc(sizeof(float) * d_ne, &d_size);
     cl_mem d_Q;
-    if (src0->backend == GGML_BACKEND_CPU) {
-        d_Q = ggml_cl_pool_malloc(q_sz, &q_size);
-    }
+
+
 
     stop_named_timer_and_record("_opencl_mul_mat_q_f32_mem_alloc");
 
@@ -1535,19 +1595,25 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
 
     stop_named_timer_and_record("_opencl_mul_mat_q_f32_get_kernels");
 
-    start_named_timer("_opencl_mul_mat_q_f32_compute");
+    // start_named_timer("_opencl_mul_mat_q_f32_compute");
+
+    if (mul_mat_vec) {
+        increase_counter("_opencl_mul_mat_vec_q_f32_mul_mat_vec");
+        // start_named_timer("_opencl_mul_mat_vec_q_f32_mul_mat_vec");
+    }else {
+        increase_counter("_opencl_mul_mat_vec_q_f32_mul_mat_mat");
+        // start_named_timer("_opencl_mul_mat_vec_q_f32_mul_mat_mat");
+    }
     // LOG(INFO) << ne00 << " " << ne01 << " " << ne10 << " " << ne11 << std::endl;
     // I20240103 11:00:36.179787 13220 ggml-opencl.cpp:1532] 2560 7680 2560 2
 
+    // LOG(INFO) << "Before Compute" << std::endl;
     for (int64_t i03 = 0; i03 < ne03; i03++) {
         // TODO: copy and dequantize src0 here when r3>1
         for (int64_t i13 = i03 * r3, e13 = i13 + r3; i13 < e13; i13++) {
             for (int64_t i02 = 0; i02 < ne02; i02++) {
                 // copy src0 to device if necessary
-                if (src0->backend == GGML_BACKEND_CPU) {
-                    events.emplace_back();
-                    CL_CHECK(ggml_cl_h2d_tensor_2d(_global_queue, d_Q, 0, src0, i03, i02, events.data() + ev_idx++));
-                } else if (src0->backend == GGML_BACKEND_GPU) {
+                if (src0->backend == GGML_BACKEND_GPU) {
                     d_Q = (cl_mem) src0->extra;
                 } else {
                     GGML_ASSERT(false);
@@ -1555,22 +1621,29 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
 
                 if (!mul_mat_vec) {
                     // convert src0 to fp32 on device
+                    start_named_timer("_opencl_mul_mat_q_f32_to_fp32");
                     const size_t global = x_ne / global_denom;
-                    const size_t offset = src0->backend == GGML_BACKEND_GPU ? (i03 * ne02 + i02) * x_bps : 0;
+                    const size_t offset = (i03 * ne02 + i02) * x_bps;
                     CL_CHECK(clSetKernelArg(to_fp32_cl, 0, sizeof(cl_mem), &d_Q));
                     CL_CHECK(clSetKernelArg(to_fp32_cl, 1, sizeof(cl_mem), &d_X));
                     CL_CHECK(clEnqueueNDRangeKernel(_global_queue, to_fp32_cl, 1, &offset, &global, local > 0 ? &local : NULL, events.size(), !events.empty() ? events.data() : NULL, NULL));
+                    stop_named_timer_and_record("_opencl_mul_mat_q_f32_to_fp32");
                 }
 
                 for (int64_t i12 = i02 * r2, e12 = i12 + r2; i12 < e12; i12++) {
+                    #ifdef ENABLE_DST_UNIFIED_MEMORY_OPTIMIZATION
+                    d_D = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * d_ne, (char *) dst->data + i12*nb2 + i13*nb3);
+                    #endif
                     if (mul_mat_vec) { // specialized dequantize_mul_mat_vec kernel
                         // copy src1 to device
+                        start_named_timer("_opencl_mul_mat_vec_q_f32_copy_src1");
                         events.emplace_back();
                         CL_CHECK(ggml_cl_h2d_tensor_2d(_global_queue, d_Y, 0, src1, i13, i12, events.data() + ev_idx++));
-
+                        stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_copy_src1");
                         // compute
+                        start_named_timer("_opencl_mul_mat_vec_q_f32_compute");
                         const size_t global = ne01 * local;
-                        const size_t offset = src0->backend == GGML_BACKEND_GPU ? (i03 * ne02 + i02) * x_bps : 0;
+                        const size_t offset = (i03 * ne02 + i02) * x_bps;
                         const cl_int ncols = ne00;
                         events.emplace_back();
                         CL_CHECK(clSetKernelArg(dmmv, 0, sizeof(cl_mem), &d_Q));
@@ -1579,14 +1652,21 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
                         CL_CHECK(clSetKernelArg(dmmv, 3, sizeof(cl_mem), &d_D));
                         CL_CHECK(clSetKernelArg(dmmv, 4, sizeof(cl_int), &ncols));
                         CL_CHECK(clEnqueueNDRangeKernel(_global_queue, dmmv, 1, &offset, &global, &local, events.size() - 1, events.data(), events.data() + ev_idx++));
+                        stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_compute");
                     } else { // CLBlast matrix matrix multiplication
                         // copy src1 to device
+                        start_named_timer("_opencl_mul_mat_mat_q_f32_copy_src1");
                         CL_CHECK(ggml_cl_h2d_tensor_2d(_global_queue, d_Y, 0, src1, i13, i12, NULL));
 
                         // wait for conversion
                         CL_CHECK(clFinish(_global_queue));
+                        stop_named_timer_and_record("_opencl_mul_mat_mat_q_f32_copy_src1");
+
+                        // _d_X = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * x_ne, &x_size, (char *) src0->data);
+                        // GGML_ASSERT(compare_matrix(d_X,_d_X,ne00,ne01),"ggml_cl_mul_mat_q_f32: src0 data copy error");
 
                         // compute
+                        start_named_timer("_opencl_mul_mat_mat_q_f32_compute");
                         events.emplace_back();
                         clblast::StatusCode status = clblast::Gemm<cl_float>(clblast::Layout::kColMajor,
                                                                    clblast::Transpose::kYes, clblast::Transpose::kNo,
@@ -1597,18 +1677,24 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
                                                                    beta,
                                                                    d_D, 0, ne01,
                                                                    &_global_queue, events.data() + ev_idx++);
-
+                        stop_named_timer_and_record("_opencl_mul_mat_mat_q_f32_compute");
                         if (status != clblast::StatusCode::kSuccess) {
                             GGML_ASSERT(false);
                         }
                     }
 
                     // copy dst to host
+                    #ifndef ENABLE_DST_UNIFIED_MEMORY_OPTIMIZATION
+                    start_named_timer("_opencl_mul_mat_q_f32_copy_dst");
                     float * d = (float *) ((char *) dst->data + i12*nb2 + i13*nb3);
                     CL_CHECK(clEnqueueReadBuffer(_global_queue, d_D, true, 0, sizeof(float) * d_ne, d, 1, &events[events.size() - 1], NULL));
                     for (auto *event : events) {
                         clReleaseEvent(event);
                     }
+                    // cl_mem _d = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * d_ne, d);
+                    // LOG_ASSERT(compare_matrix(d_D,_d,d_ne),"ggml_cl_mul_mat_q_f32: dst data copy error");
+                    stop_named_timer_and_record("_opencl_mul_mat_q_f32_copy_dst");
+                    #endif
 
                     ev_idx = 0;
                     events.clear();
@@ -1616,7 +1702,17 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
             }
         }
     }
-    stop_named_timer_and_record("_opencl_mul_mat_q_f32_compute");
+
+    // if (mul_mat_vec) {
+    //     stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_mul_mat_vec");
+    // }
+    // else {
+    //     stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_mul_mat_mat");
+    // }
+
+    // stop_named_timer_and_record("_opencl_mul_mat_q_f32_compute");
+
+    // LOG(INFO) << "After Compute" << std::endl;
 
     start_named_timer("_opencl_mul_mat_q_f32_mem_free");
     if (!mul_mat_vec) {
@@ -1624,16 +1720,8 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     }
     ggml_cl_pool_free(d_Y, y_size);
     ggml_cl_pool_free(d_D, d_size);
-    if (src0->backend == GGML_BACKEND_CPU) {
-        ggml_cl_pool_free(d_Q, q_size);
-    }
     stop_named_timer_and_record("_opencl_mul_mat_q_f32_mem_free");
-    if (mul_mat_vec) {
-        stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_mul_mat_vec");
-    }
-    else {
-        stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_mul_mat_mat");
-    }
+
 }
 
 

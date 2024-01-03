@@ -5,6 +5,8 @@
 #include <CL/cl.h>
 #ifndef PRINT_INFO_H
 
+// #define ENABLE_DST_UNIFIED_MEMORY_OPTIMIZATION
+
 extern bool fp16_support;
 extern bool unified_memory_support;
 extern cl_platform_id _global_platform;
@@ -38,6 +40,7 @@ void run_kernel(cl_kernel kernel, const size_t global_size, const size_t local_s
 void read_buffer(const cl_mem buffer, const size_t size, void* host_ptr);
 void release_opencl_env();
 void check_unified_memory_support();
+bool compare_matrix(cl_mem x, cl_mem _x,size_t size_f);
 
 
 #define PRINT_INFO_H

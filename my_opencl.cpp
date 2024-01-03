@@ -32,7 +32,8 @@ char* platform_name = "Intel(R) OpenCL HD Graphics";
 //"NVIDIA CUDA";
 char* device_name = "Intel(R) UHD Graphics";
 //"NVIDIA GeForce RTX 2060";
-char* kernels_file = "../kernels.cl";
+char* kernels_file = "E:\\Projects\\llama.cpp\\kernels.cl";
+//E:\Projects\llama.cpp\kernels.cl
 
 
 void init_logging(const char* argv0) {
@@ -279,6 +280,46 @@ void build_all_kernels() {
         CHECK_ERROR(err, "Failed to get kernel name")
         _global_kernels[kernel_name] = kernels[i];
     }
+}
+
+// __kernel void compare_matrices(__global const float* matrixA, __global const float* matrixB, __global bool* result, const int rows, const int cols) {
+//     int row = get_global_id(0);
+//     int col = get_global_id(1);
+//
+//     if (row < rows && col < cols) {
+//         int index = row * cols + col;
+//         if (matrixA[index] != matrixB[index]) {
+//             *result = false;
+//         }
+//     }
+// }
+
+bool compare_matrix(cl_mem x, cl_mem _x,size_t size_f) {
+    // cl_kernel compare_matrix_cl = get_kernel("compare_matrices");
+    // clSetKernelArg(compare_matrix_cl, 0, sizeof(cl_mem), &x);
+    // clSetKernelArg(compare_matrix_cl, 1, sizeof(cl_mem), &_x);
+    // cl_mem result = create_buffer(buffer_type::WRITE_ONLY, sizeof(bool), nullptr);
+    // clSetKernelArg(compare_matrix_cl, 2, sizeof(cl_mem), &result);
+    // clSetKernelArg(compare_matrix_cl, 3, sizeof(size_t), &rows);
+    // clSetKernelArg(compare_matrix_cl, 4, sizeof(size_t), &cols);
+    // size_t global = rows * cols;
+    // size_t local = 0;
+    // size_t offset = 0;
+    // cl_int err = clEnqueueNDRangeKernel(_global_queue, compare_matrix_cl, 1, &offset, &global, local > 0 ? &local : NULL, 0, NULL, NULL);
+    // CHECK_ERROR(err, "Failed to run kernel")
+    // bool* host_ptr = (bool *)malloc(sizeof(bool));
+    // read_buffer(result, sizeof(bool), host_ptr);
+    size_t size = size_f * sizeof(float);
+    float* host_ptr = (float *)malloc(size);
+    float* _host_ptr = (float *)malloc(size);
+    read_buffer(x, size, host_ptr);
+    read_buffer(_x, size, _host_ptr);
+    for (int i = 0; i < size_f; i++) {
+        if (host_ptr[i] != _host_ptr[i]) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void add_kernel(const char* kernel_name, cl_kernel kernel) {
