@@ -1655,6 +1655,7 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
                 CL_CHECK(clFinish(_global_queue));
 
                 for (int64_t i12 = i02 * r2, e12 = i12 + r2; i12 < e12; i12++) {
+                    CL_CHECK(clFinish(_global_queue));
 #ifdef ENABLE_UNIFIED_MEMORY_OPTIMIZATION
                     d_D = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * d_ne, (float *) ((char *) dst->data + i12*nb2 + i13*nb3));
                     d_Y = ggml_cl_h2d_tensor_2d_with_unified_mem(0, src1, i13, i12);
@@ -1675,15 +1676,18 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
                         const size_t global = ne01 * local;
                         const size_t offset = (i03 * ne02 + i02) * x_bps;
                         const cl_int ncols = ne00;
-                        events.emplace_back();
                         CL_CHECK(clSetKernelArg(dmmv, 0, sizeof(cl_mem), &d_Q));
                         CL_CHECK(clSetKernelArg(dmmv, 1, sizeof(float) * local, NULL));
                         CL_CHECK(clSetKernelArg(dmmv, 2, sizeof(cl_mem), &d_Y));
                         CL_CHECK(clSetKernelArg(dmmv, 3, sizeof(cl_mem), &d_D));
                         CL_CHECK(clSetKernelArg(dmmv, 4, sizeof(cl_int), &ncols));
-                        cl_uint err = clEnqueueNDRangeKernel(_global_queue, dmmv, 1, &offset, &global, &local, events.size() - 1, events.data(), events.data() + ev_idx++);
+                        cl_uint err = clEnqueueNDRangeKernel(_global_queue, dmmv, 1, &offset, &global, &local, events.size(), !events.empty() ? events.data() : NULL, NULL);
+                        // wait for conversion
+                        CL_CHECK(clFinish(_global_queue));
                         if (err != CL_SUCCESS) {
-                            // get the error string
+                            // uint print
+                            fprintf(stderr, "ggml_opencl: clEnqueueNDRangeKernel error %d at %s:%d\n", err, __FILE__, __LINE__);
+                            // get the error string, run kernel error
                             size_t len;
                             clGetProgramBuildInfo(program, _global_device, CL_PROGRAM_BUILD_LOG, 0, NULL, &len);
                             char *buffer = (char *)malloc(len);
@@ -1745,6 +1749,10 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
                             GGML_ASSERT(false);
                         }
                         #endif
+
+                        if (status != clblast::StatusCode::kSuccess) {
+                            GGML_ASSERT(false);
+                        }
                     }
 
                     // copy dst to host
