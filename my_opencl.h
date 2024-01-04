@@ -5,7 +5,8 @@
 #include <CL/cl.h>
 #ifndef PRINT_INFO_H
 
-// #define ENABLE_DST_UNIFIED_MEMORY_OPTIMIZATION
+// #define ENABLE_UNIFIED_MEMORY_OPTIMIZATION
+// #define ENABLE_MATRIX_COMPARE
 
 extern bool fp16_support;
 extern bool unified_memory_support;

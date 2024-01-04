@@ -9,6 +9,8 @@
 #include <my_opencl.h>
 #include <glog/logging.h>
 
+#include "examples/server/httplib.h"
+
 // CHECK_ERROR is a macro, it is defined in info.h
 #define CHECK_ERROR(err, msg) \
     if (err != CL_SUCCESS) { \
@@ -294,7 +296,7 @@ void build_all_kernels() {
 //     }
 // }
 
-bool compare_matrix(cl_mem x, cl_mem _x,size_t size_f) {
+bool compare_matrix(cl_mem x, cl_mem _x,size_t size) {
     // cl_kernel compare_matrix_cl = get_kernel("compare_matrices");
     // clSetKernelArg(compare_matrix_cl, 0, sizeof(cl_mem), &x);
     // clSetKernelArg(compare_matrix_cl, 1, sizeof(cl_mem), &_x);
@@ -309,12 +311,12 @@ bool compare_matrix(cl_mem x, cl_mem _x,size_t size_f) {
     // CHECK_ERROR(err, "Failed to run kernel")
     // bool* host_ptr = (bool *)malloc(sizeof(bool));
     // read_buffer(result, sizeof(bool), host_ptr);
-    size_t size = size_f * sizeof(float);
-    float* host_ptr = (float *)malloc(size);
-    float* _host_ptr = (float *)malloc(size);
+
+    byte* host_ptr = (byte *)malloc(size);
+    byte* _host_ptr = (byte *)malloc(size);
     read_buffer(x, size, host_ptr);
     read_buffer(_x, size, _host_ptr);
-    for (int i = 0; i < size_f; i++) {
+    for (int i = 0; i < size; i++) {
         if (host_ptr[i] != _host_ptr[i]) {
             return false;
         }
