@@ -1602,7 +1602,6 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     cl_mem d_Q;
 
 
-
     stop_named_timer_and_record("_opencl_mul_mat_q_f32_mem_alloc");
 
     start_named_timer("_opencl_mul_mat_q_f32_get_kernels");
@@ -1651,6 +1650,9 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
                     CL_CHECK(clEnqueueNDRangeKernel(_global_queue, to_fp32_cl, 1, &offset, &global, local > 0 ? &local : NULL, events.size(), !events.empty() ? events.data() : NULL, NULL));
                     stop_named_timer_and_record("_opencl_mul_mat_q_f32_to_fp32");
                 }
+
+                // wait for conversion
+                CL_CHECK(clFinish(_global_queue));
 
                 for (int64_t i12 = i02 * r2, e12 = i12 + r2; i12 < e12; i12++) {
 #ifdef ENABLE_UNIFIED_MEMORY_OPTIMIZATION
@@ -1756,6 +1758,12 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
                     // cl_mem _d = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * d_ne, d);
                     // LOG_ASSERT(compare_matrix(d_D,_d,d_ne),"ggml_cl_mul_mat_q_f32: dst data copy error");
                     stop_named_timer_and_record("_opencl_mul_mat_q_f32_copy_dst");
+                    #else
+                    // wait for all events
+                    CL_CHECK(clFinish(_global_queue));
+                    for (auto *event : events) {
+                        clReleaseEvent(event);
+                    }
                     #endif
 
                     ev_idx = 0;
