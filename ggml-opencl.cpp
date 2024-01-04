@@ -1656,21 +1656,11 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
 
                 for (int64_t i12 = i02 * r2, e12 = i12 + r2; i12 < e12; i12++) {
                     CL_CHECK(clFinish(_global_queue));
-#ifdef ENABLE_UNIFIED_MEMORY_OPTIMIZATION
                     d_D = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * d_ne, (float *) ((char *) dst->data + i12*nb2 + i13*nb3));
                     d_Y = ggml_cl_h2d_tensor_2d_with_unified_mem(0, src1, i13, i12);
-#else
-#endif
 
 
                     if (mul_mat_vec) { // specialized dequantize_mul_mat_vec kernel
-#ifndef ENABLE_UNIFIED_MEMORY_OPTIMIZATION
-                        // copy src1 to device
-                        start_named_timer("_opencl_mul_mat_vec_q_f32_copy_src1");
-                        events.emplace_back();
-                        CL_CHECK(ggml_cl_h2d_tensor_2d(_global_queue, d_Y, 0, src1, i13, i12, events.data() + ev_idx++));
-                        stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_copy_src1");
-#endif
                         // compute
                         start_named_timer("_opencl_mul_mat_vec_q_f32_compute");
                         const size_t global = ne01 * local;
@@ -1697,21 +1687,7 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
                             GGML_ASSERT(false);
                         }
                         stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_compute");
-                    } else
-
-                        {
-                        // CLBlast matrix matrix multiplication
-                        // copy src1 to device
-#ifndef ENABLE_UNIFIED_MEMORY_OPTIMIZATION
-                        start_named_timer("_opencl_mul_mat_mat_q_f32_copy_src1");
-                        CL_CHECK(ggml_cl_h2d_tensor_2d(_global_queue, d_Y, 0, src1, i13, i12, NULL));
-                        // wait for conversion
-                        CL_CHECK(clFinish(_global_queue));
-                        stop_named_timer_and_record("_opencl_mul_mat_mat_q_f32_copy_src1");
-#endif
-                        // _d_X = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * x_ne, &x_size, (char *) src0->data);
-                        // GGML_ASSERT(compare_matrix(d_X,_d_X,ne00,ne01),"ggml_cl_mul_mat_q_f32: src0 data copy error");
-
+                    } else {
                         // compute
                         start_named_timer("_opencl_mul_mat_mat_q_f32_compute");
                         events.emplace_back();
@@ -1755,25 +1731,11 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
                         }
                     }
 
-                    // copy dst to host
-                    #ifndef ENABLE_UNIFIED_MEMORY_OPTIMIZATION
-                    start_named_timer("_opencl_mul_mat_q_f32_copy_dst");
-                    float * d = (float *) ((char *) dst->data + i12*nb2 + i13*nb3);
-                    CL_CHECK(clEnqueueReadBuffer(_global_queue, d_D, true, 0, sizeof(float) * d_ne, d, 1, &events[events.size() - 1], NULL));
-                    for (auto *event : events) {
-                        clReleaseEvent(event);
-                    }
-                    // cl_mem _d = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * d_ne, d);
-                    // LOG_ASSERT(compare_matrix(d_D,_d,d_ne),"ggml_cl_mul_mat_q_f32: dst data copy error");
-                    stop_named_timer_and_record("_opencl_mul_mat_q_f32_copy_dst");
-                    #else
                     // wait for all events
                     CL_CHECK(clFinish(_global_queue));
                     for (auto *event : events) {
                         clReleaseEvent(event);
                     }
-                    #endif
-
                     ev_idx = 0;
                     events.clear();
                 }
