@@ -20,6 +20,8 @@ extern "C" {
     void _clear_time_record();
     void _print_time_record();
     void _increase_counter(const char * name);
+    void _create_statistic_map(const char * name);
+    void _self_increase_statistic(const char * name, const char * key);
 
 # if ENABLE_TIME_RECORD
     #define init_time_record() _init_time_record()
@@ -29,6 +31,8 @@ extern "C" {
     #define clear_time_record() _clear_time_record()
     #define print_time_record() _print_time_record()
     #define increase_counter(name) _increase_counter(name)
+    #define create_statistic_map(name) _create_statistic_map(name)
+    #define self_increase_statistic(name, key) _self_increase_statistic(name, key)
 # else
     #define init_time_record()
     #define record_time(name, time)
@@ -37,6 +41,8 @@ extern "C" {
     #define clear_time_record()
     #define print_time_record()
     #define increase_counter(name)
+    #define create_statistic_map(name)
+    #define self_increase_statistic(name, key)
 # endif
 
 

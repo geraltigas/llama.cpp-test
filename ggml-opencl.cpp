@@ -1,4 +1,6 @@
 #include "ggml.h"
+#include "macro.h"
+#include "macro.h"
 #include "ggml-opencl.h"
 
 #include <array>
@@ -1559,6 +1561,10 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     const int64_t ne10 = src1->ne[0];
     const int64_t ne11 = src1->ne[1];
 
+    // format the size of the two matrixs {ne00, ne01} * {ne10, ne11}
+    const std::string size_str = "{" + std::to_string(ne00) + ", " + std::to_string(ne01) + "} * {" + std::to_string(ne10) + ", " + std::to_string(ne11) + "}";
+    _self_increase_statistic("GEMM", size_str.c_str());
+
     const ggml_type type = src0->type;
     const bool mul_mat_vec = ne11 == 1 && ne00%2 == 0;
 
@@ -1606,24 +1612,13 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
         GGML_ASSERT(false);
     }
 
-    if (!mul_mat_vec) {
-        // convert src0 to fp32 on device
-        start_named_timer("_opencl_mul_mat_q_f32_to_fp32");
-        const size_t global = x_ne / global_denom;
-        CL_CHECK(clSetKernelArg(to_fp32_cl, 0, sizeof(cl_mem), &d_Q));
-        CL_CHECK(clSetKernelArg(to_fp32_cl, 1, sizeof(cl_mem), &d_X));
-        CL_CHECK(clEnqueueNDRangeKernel(_global_queue, to_fp32_cl, 1, &offset, &global, local > 0 ? &local : NULL, events.size(), !events.empty() ? events.data() : NULL, NULL));
-        CL_CHECK(clFinish(_global_queue));
-        stop_named_timer_and_record("_opencl_mul_mat_q_f32_to_fp32");
-    }
-
     // wait for conversion
     d_D = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * d_ne, (float *) ((char *) dst->data));
     d_Y = ggml_cl_h2d_tensor_2d_with_unified_mem(0, src1, 0, 0);
 
     if (mul_mat_vec) { // specialized dequantize_mul_mat_vec kernel
         // compute
-        start_named_timer("_opencl_mul_mat_vec_q_f32_compute");
+        start_named_timer("_opencl_kernel_mul_mat_vec_q_f32_compute");
         const size_t global = ne01 * local;
         const cl_int ncols = ne00;
         CL_CHECK(clSetKernelArg(dmmv, 0, sizeof(cl_mem), &d_Q));
@@ -1634,9 +1629,17 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
         CL_CHECK(clEnqueueNDRangeKernel(_global_queue, dmmv, 1, &offset, &global, &local, events.size(), !events.empty() ? events.data() : NULL, NULL));
         // wait for all events
         CL_CHECK(clFinish(_global_queue));
-        stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_compute");
+        stop_named_timer_and_record("_opencl_kernel_mul_mat_vec_q_f32_compute");
     } else {
-        start_named_timer("_opencl_mul_mat_mat_q_f32_compute");
+        // convert src0 to fp32 on device
+        start_named_timer("_opencl_kernel_mul_mat_q_f32_to_fp32");
+        const size_t global = x_ne / global_denom;
+        CL_CHECK(clSetKernelArg(to_fp32_cl, 0, sizeof(cl_mem), &d_Q));
+        CL_CHECK(clSetKernelArg(to_fp32_cl, 1, sizeof(cl_mem), &d_X));
+        CL_CHECK(clEnqueueNDRangeKernel(_global_queue, to_fp32_cl, 1, &offset, &global, local > 0 ? &local : NULL, events.size(), !events.empty() ? events.data() : NULL, NULL));
+        CL_CHECK(clFinish(_global_queue));
+        stop_named_timer_and_record("_opencl_kernel_mul_mat_q_f32_to_fp32");
+        start_named_timer("_opencl_kernel_mul_mat_mat_q_f32_compute");
         size_t ev_idx = 0;
         constexpr float beta = 0.0f;
         constexpr float alpha = 1.0f;
@@ -1657,7 +1660,7 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
         }
         // wait for all events
         CL_CHECK(clFinish(_global_queue));
-        stop_named_timer_and_record("_opencl_mul_mat_mat_q_f32_compute");
+        stop_named_timer_and_record("_opencl_kernel_mul_mat_mat_q_f32_compute");
     }
 
 

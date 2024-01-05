@@ -86,6 +86,45 @@ void print_begin_with(const char * prefix) {
     }
 }
 
+void print_begin_with_addup(const char * prefix) {
+    double total_time = 0;
+    for (auto it = time_record.begin(); it != time_record.end(); ++it) {
+        if (it->first.find(prefix) == 0) {
+            printf("%s: %.3f, called %d times\n", it->first.c_str(), it->second, record_times[it->first]);
+            total_time += it->second;
+        }
+    }
+    printf("Total time: %.3f\n", total_time);
+}
+
+std::map<std::string, std::map<std::string, size_t>> statistic_map;
+
+void _create_statistic_map(const char * name) {
+    // add a new map
+    statistic_map[name] = std::map<std::string, size_t>();
+}
+
+void _add_statistic(const char * name, const char * key, size_t value) {
+    statistic_map[name][key] = value;
+}
+
+void _self_increase_statistic(const char * name, const char * key) {
+    if (statistic_map.find(name) == statistic_map.end()) {
+        statistic_map[name] = std::map<std::string, size_t>();
+    }
+    if (statistic_map[name].find(key) == statistic_map[name].end()) {
+        statistic_map[name][key] = 0;
+    }
+    statistic_map[name][key] = statistic_map[name][key] + 1;
+}
+
+void _print_statistic_map(const char * name) {
+    printf("------ statistic map: %s\n", name);
+    for (auto it = statistic_map[name].begin(); it != statistic_map[name].end(); ++it) {
+        printf("%s: %zu\n", it->first.c_str(), it->second);
+    }
+}
+
 void _print_time_record() {
     double total_time = 0;
     std::string max_op_name;
@@ -111,9 +150,14 @@ void _print_time_record() {
     printf("Other time: %.3f\n", other_time);
 
     printf("------ time record\n");
-    print_begin_with("_opencl");
+    print_begin_with_addup("_opencl");
+    printf("------ kernel record\n");
+    print_begin_with_addup("_opencl_kernel");
     printf("------ counter\n");
     for (auto it = counter.begin(); it != counter.end(); ++it) {
         printf("%s: %d\n", it->first.c_str(), it->second);
     }
+    _print_statistic_map("GEMM");
 }
+
+
