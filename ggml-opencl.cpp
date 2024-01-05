@@ -1547,6 +1547,8 @@ static void ggml_cl_mul_mat_f16(const ggml_tensor * src0, const ggml_tensor * sr
     ggml_cl_pool_free(d_D, d_size);
 }
 
+#define TEST_LOG ON
+
 static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
     // LOG(INFO) << "ggml_cl_mul_mat_q_f32" << std::endl;
     start_named_timer("_opencl_mul_mat_q_f32_init");
@@ -1560,6 +1562,12 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     const int64_t ne12 = src1->ne[2];
     const int64_t ne13 = src1->ne[3];
 
+#if TEST_LOG
+    if (ne02 != 1 || ne03 != 1 || ne12 != 1 || ne13 != 1) {
+        LOG(INFO) << "ggml_cl_mul_mat_q_f32: ne02 != 1 || ne03 != 1 || ne12 != 1 || ne13 != 1" << std::endl;
+    }
+#endif
+
     // LOG(INFO) << ne00 << " " << ne01 << " " << ne02 << " " << ne03 << std::endl;
     // LOG(INFO) << ne10 << " " << ne11 << " " << ne12 << " " << ne13 << std::endl;
 
@@ -1570,6 +1578,12 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
 
     const int64_t r2 = ne12 / ne02;
     const int64_t r3 = ne13 / ne03;
+
+#if TEST_LOG
+    if (r2 != 1 || r3 != 1) {
+        LOG(INFO) << "ggml_cl_mul_mat_q_f32: r2 != 1 || r3 != 1" << std::endl;
+    }
+#endif
 
     const float alpha = 1.0f;
     const float beta = 0.0f;
@@ -1591,13 +1605,8 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     if (!mul_mat_vec) {
         d_X = ggml_cl_pool_malloc(sizeof(float) * x_ne, &x_size);
     }
-#ifdef ENABLE_UNIFIED_MEMORY_OPTIMIZATION
     cl_mem d_Y;
     cl_mem d_D;
-#else
-    cl_mem d_Y = ggml_cl_pool_malloc(sizeof(float) * y_ne, &y_size);
-    cl_mem d_D = ggml_cl_pool_malloc(sizeof(float) * d_ne, &d_size);
-#endif
 
     cl_mem d_Q;
 
@@ -1703,7 +1712,7 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
 
 
 
-                        #ifdef ENABLE_MATRIX_COMPARE
+                        #if ENABLE_MATRIX_COMPARE
                         cl_mem _d_D = create_buffer(buffer_type::READ_WRITE,sizeof(float) * d_ne,nullptr);
                         clblast::StatusCode status2 = clblast::Gemm<cl_float>(clblast::Layout::kColMajor,
                                                                    clblast::Transpose::kYes, clblast::Transpose::kNo,
@@ -1758,13 +1767,8 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     if (!mul_mat_vec) {
         ggml_cl_pool_free(d_X, x_size);
     }
-#ifdef ENABLE_UNIFIED_MEMORY_OPTIMIZATION
     clReleaseMemObject(d_Y);
     clReleaseMemObject(d_D);
-#else
-    ggml_cl_pool_free(d_Y, y_size);
-    ggml_cl_pool_free(d_D, d_size);
-#endif
     stop_named_timer_and_record("_opencl_mul_mat_q_f32_mem_free");
 
 }

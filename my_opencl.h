@@ -3,10 +3,12 @@
 //
 
 #include <CL/cl.h>
+#include "./macro.h"
 #ifndef PRINT_INFO_H
 
-#define ENABLE_UNIFIED_MEMORY_OPTIMIZATION
-// #define ENABLE_MATRIX_COMPARE
+
+
+#define ENABLE_MATRIX_COMPARE OFF
 
 extern bool fp16_support;
 extern bool unified_memory_support;

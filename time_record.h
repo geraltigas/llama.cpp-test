@@ -3,8 +3,11 @@
 //
 
 #ifndef TIME_RECORD_H
+#define TIME_RECORD_H
 
-#define ENABLE_TIME_RECORD
+#include "./macro.h"
+
+#define ENABLE_TIME_RECORD OFF
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +21,7 @@ extern "C" {
     void _print_time_record();
     void _increase_counter(const char * name);
 
-# ifdef ENABLE_TIME_RECORD
+# if ENABLE_TIME_RECORD
     #define init_time_record() _init_time_record()
     #define record_time(name, time) _record_time(name, time)
     #define start_named_timer(name) _start_named_timer(name)
