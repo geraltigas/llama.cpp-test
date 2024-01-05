@@ -1552,56 +1552,24 @@ static void ggml_cl_mul_mat_f16(const ggml_tensor * src0, const ggml_tensor * sr
 static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
     // LOG(INFO) << "ggml_cl_mul_mat_q_f32" << std::endl;
     start_named_timer("_opencl_mul_mat_q_f32_init");
+    constexpr size_t offset = 0;
     const int64_t ne00 = src0->ne[0];
     const int64_t ne01 = src0->ne[1];
-    const int64_t ne02 = src0->ne[2];
-    const int64_t ne03 = src0->ne[3];
 
     const int64_t ne10 = src1->ne[0];
     const int64_t ne11 = src1->ne[1];
-    const int64_t ne12 = src1->ne[2];
-    const int64_t ne13 = src1->ne[3];
 
-#if TEST_LOG
-    if (ne02 != 1 || ne03 != 1 || ne12 != 1 || ne13 != 1) {
-        LOG(INFO) << "ggml_cl_mul_mat_q_f32: ne02 != 1 || ne03 != 1 || ne12 != 1 || ne13 != 1" << std::endl;
-    }
-#endif
-
-    // LOG(INFO) << ne00 << " " << ne01 << " " << ne02 << " " << ne03 << std::endl;
-    // LOG(INFO) << ne10 << " " << ne11 << " " << ne12 << " " << ne13 << std::endl;
-
-    const int nb2  = dst->nb[2];
-    const int nb3  = dst->nb[3];
     const ggml_type type = src0->type;
     const bool mul_mat_vec = ne11 == 1 && ne00%2 == 0;
 
-    const int64_t r2 = ne12 / ne02;
-    const int64_t r3 = ne13 / ne03;
-
-#if TEST_LOG
-    if (r2 != 1 || r3 != 1) {
-        LOG(INFO) << "ggml_cl_mul_mat_q_f32: r2 != 1 || r3 != 1" << std::endl;
-    }
-#endif
-
-    const float alpha = 1.0f;
-    const float beta = 0.0f;
     const int x_ne = ne01 * ne00;
-    const int y_ne = ne11 * ne10;
     const int d_ne = ne11 * ne01;
-    const int x_bps = x_ne / ggml_blck_size(type); // blocks per 2D slice
-    const size_t q_sz = ggml_type_size(type) * x_bps;
 
     stop_named_timer_and_record("_opencl_mul_mat_q_f32_init");
 
     start_named_timer("_opencl_mul_mat_q_f32_mem_alloc");
     size_t x_size;
-    size_t y_size;
-    size_t d_size;
-    size_t q_size;
     cl_mem d_X;
-    cl_mem _d_X;
     if (!mul_mat_vec) {
         d_X = ggml_cl_pool_malloc(sizeof(float) * x_ne, &x_size);
     }
@@ -1609,7 +1577,6 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     cl_mem d_D;
 
     cl_mem d_Q;
-
 
     stop_named_timer_and_record("_opencl_mul_mat_q_f32_mem_alloc");
 
@@ -1620,7 +1587,6 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     const size_t global_denom = ggml_cl_global_denom(type);
     const size_t local = mul_mat_vec ? CL_DMMV_LOCAL_SIZE : ggml_cl_local_size(type);
 
-    size_t ev_idx = 0;
     std::vector<cl_event> events;
 
     stop_named_timer_and_record("_opencl_mul_mat_q_f32_get_kernels");
@@ -1629,78 +1595,54 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
 
     if (mul_mat_vec) {
         increase_counter("_opencl_mul_mat_vec_q_f32_mul_mat_vec");
-        // start_named_timer("_opencl_mul_mat_vec_q_f32_mul_mat_vec");
     }else {
         increase_counter("_opencl_mul_mat_vec_q_f32_mul_mat_mat");
-        // start_named_timer("_opencl_mul_mat_vec_q_f32_mul_mat_mat");
     }
-    // LOG(INFO) << ne00 << " " << ne01 << " " << ne10 << " " << ne11 << std::endl;
-    // I20240103 11:00:36.179787 13220 ggml-opencl.cpp:1532] 2560 7680 2560 2
 
-    // LOG(INFO) << "Before Compute" << std::endl;
-    for (int64_t i03 = 0; i03 < ne03; i03++) {
-        // TODO: copy and dequantize src0 here when r3>1
-        for (int64_t i13 = i03 * r3, e13 = i13 + r3; i13 < e13; i13++) {
-            for (int64_t i02 = 0; i02 < ne02; i02++) {
-                // copy src0 to device if necessary
-                if (src0->backend == GGML_BACKEND_GPU) {
-                    d_Q = (cl_mem) src0->extra;
-                } else {
-                    GGML_ASSERT(false);
-                }
+    // copy src0 to device if necessary
+    if (src0->backend == GGML_BACKEND_GPU) {
+        d_Q = static_cast<cl_mem>(src0->extra);
+    } else {
+        GGML_ASSERT(false);
+    }
 
-                if (!mul_mat_vec) {
-                    // convert src0 to fp32 on device
-                    start_named_timer("_opencl_mul_mat_q_f32_to_fp32");
-                    const size_t global = x_ne / global_denom;
-                    const size_t offset = (i03 * ne02 + i02) * x_bps;
-                    CL_CHECK(clSetKernelArg(to_fp32_cl, 0, sizeof(cl_mem), &d_Q));
-                    CL_CHECK(clSetKernelArg(to_fp32_cl, 1, sizeof(cl_mem), &d_X));
-                    CL_CHECK(clEnqueueNDRangeKernel(_global_queue, to_fp32_cl, 1, &offset, &global, local > 0 ? &local : NULL, events.size(), !events.empty() ? events.data() : NULL, NULL));
-                    stop_named_timer_and_record("_opencl_mul_mat_q_f32_to_fp32");
-                }
+    if (!mul_mat_vec) {
+        // convert src0 to fp32 on device
+        start_named_timer("_opencl_mul_mat_q_f32_to_fp32");
+        const size_t global = x_ne / global_denom;
+        CL_CHECK(clSetKernelArg(to_fp32_cl, 0, sizeof(cl_mem), &d_Q));
+        CL_CHECK(clSetKernelArg(to_fp32_cl, 1, sizeof(cl_mem), &d_X));
+        CL_CHECK(clEnqueueNDRangeKernel(_global_queue, to_fp32_cl, 1, &offset, &global, local > 0 ? &local : NULL, events.size(), !events.empty() ? events.data() : NULL, NULL));
+        CL_CHECK(clFinish(_global_queue));
+        stop_named_timer_and_record("_opencl_mul_mat_q_f32_to_fp32");
+    }
 
-                // wait for conversion
-                CL_CHECK(clFinish(_global_queue));
+    // wait for conversion
+    d_D = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * d_ne, (float *) ((char *) dst->data));
+    d_Y = ggml_cl_h2d_tensor_2d_with_unified_mem(0, src1, 0, 0);
 
-                for (int64_t i12 = i02 * r2, e12 = i12 + r2; i12 < e12; i12++) {
-                    CL_CHECK(clFinish(_global_queue));
-                    d_D = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * d_ne, (float *) ((char *) dst->data + i12*nb2 + i13*nb3));
-                    d_Y = ggml_cl_h2d_tensor_2d_with_unified_mem(0, src1, i13, i12);
-
-
-                    if (mul_mat_vec) { // specialized dequantize_mul_mat_vec kernel
-                        // compute
-                        start_named_timer("_opencl_mul_mat_vec_q_f32_compute");
-                        const size_t global = ne01 * local;
-                        const size_t offset = (i03 * ne02 + i02) * x_bps;
-                        const cl_int ncols = ne00;
-                        CL_CHECK(clSetKernelArg(dmmv, 0, sizeof(cl_mem), &d_Q));
-                        CL_CHECK(clSetKernelArg(dmmv, 1, sizeof(float) * local, NULL));
-                        CL_CHECK(clSetKernelArg(dmmv, 2, sizeof(cl_mem), &d_Y));
-                        CL_CHECK(clSetKernelArg(dmmv, 3, sizeof(cl_mem), &d_D));
-                        CL_CHECK(clSetKernelArg(dmmv, 4, sizeof(cl_int), &ncols));
-                        cl_uint err = clEnqueueNDRangeKernel(_global_queue, dmmv, 1, &offset, &global, &local, events.size(), !events.empty() ? events.data() : NULL, NULL);
-                        // wait for conversion
-                        CL_CHECK(clFinish(_global_queue));
-                        if (err != CL_SUCCESS) {
-                            // uint print
-                            fprintf(stderr, "ggml_opencl: clEnqueueNDRangeKernel error %d at %s:%d\n", err, __FILE__, __LINE__);
-                            // get the error string, run kernel error
-                            size_t len;
-                            clGetProgramBuildInfo(program, _global_device, CL_PROGRAM_BUILD_LOG, 0, NULL, &len);
-                            char *buffer = (char *)malloc(len);
-                            clGetProgramBuildInfo(program, _global_device, CL_PROGRAM_BUILD_LOG, len, buffer, NULL);
-                            fprintf(stderr, "%s\n", buffer);
-                            free(buffer);
-                            GGML_ASSERT(false);
-                        }
-                        stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_compute");
-                    } else {
-                        // compute
-                        start_named_timer("_opencl_mul_mat_mat_q_f32_compute");
-                        events.emplace_back();
-                        clblast::StatusCode status = clblast::Gemm<cl_float>(clblast::Layout::kColMajor,
+    if (mul_mat_vec) { // specialized dequantize_mul_mat_vec kernel
+        // compute
+        start_named_timer("_opencl_mul_mat_vec_q_f32_compute");
+        const size_t global = ne01 * local;
+        const cl_int ncols = ne00;
+        CL_CHECK(clSetKernelArg(dmmv, 0, sizeof(cl_mem), &d_Q));
+        CL_CHECK(clSetKernelArg(dmmv, 1, sizeof(float) * local, NULL));
+        CL_CHECK(clSetKernelArg(dmmv, 2, sizeof(cl_mem), &d_Y));
+        CL_CHECK(clSetKernelArg(dmmv, 3, sizeof(cl_mem), &d_D));
+        CL_CHECK(clSetKernelArg(dmmv, 4, sizeof(cl_int), &ncols));
+        CL_CHECK(clEnqueueNDRangeKernel(_global_queue, dmmv, 1, &offset, &global, &local, events.size(), !events.empty() ? events.data() : NULL, NULL));
+        // wait for all events
+        CL_CHECK(clFinish(_global_queue));
+        stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_compute");
+    } else {
+        start_named_timer("_opencl_mul_mat_mat_q_f32_compute");
+        size_t ev_idx = 0;
+        constexpr float beta = 0.0f;
+        constexpr float alpha = 1.0f;
+        // compute
+        events.emplace_back();
+        const clblast::StatusCode status = clblast::Gemm<cl_float>(clblast::Layout::kColMajor,
                                                                    clblast::Transpose::kYes, clblast::Transpose::kNo,
                                                                    ne01, ne11, ne10,
                                                                    alpha,
@@ -1710,67 +1652,27 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
                                                                    d_D, 0, ne01,
                                                                    &_global_queue, events.data() + ev_idx++);
 
-
-
-                        #if ENABLE_MATRIX_COMPARE
-                        cl_mem _d_D = create_buffer(buffer_type::READ_WRITE,sizeof(float) * d_ne,nullptr);
-                        clblast::StatusCode status2 = clblast::Gemm<cl_float>(clblast::Layout::kColMajor,
-                                                                   clblast::Transpose::kYes, clblast::Transpose::kNo,
-                                                                   ne01, ne11, ne10,
-                                                                   alpha,
-                                                                   d_X, 0, ne00,
-                                                                   d_Y, 0, ne10,
-                                                                   beta,
-                                                                   _d_D, 0, ne01,
-                                                                   &_global_queue, NULL);
-                        const bool is_same = compare_matrix(d_D,_d_D,sizeof(float) * d_ne);
-                        if (!is_same) {
-                            LOG(INFO) << "ggml_cl_mul_mat_q_f32: dst data copy error" << std::endl;
-                        }else {
-                            // LOG(INFO) << "ggml_cl_mul_mat_q_f32: dst data copy success" << std::endl;
-                        }
-                        stop_named_timer_and_record("_opencl_mul_mat_mat_q_f32_compute");
-                        if (status != clblast::StatusCode::kSuccess || status2 != clblast::StatusCode::kSuccess) {
-                            GGML_ASSERT(false);
-                        }
-                        #endif
-
-                        if (status != clblast::StatusCode::kSuccess) {
-                            GGML_ASSERT(false);
-                        }
-                    }
-
-                    // wait for all events
-                    CL_CHECK(clFinish(_global_queue));
-                    for (auto *event : events) {
-                        clReleaseEvent(event);
-                    }
-                    ev_idx = 0;
-                    events.clear();
-                }
-            }
+        if (status != clblast::StatusCode::kSuccess) {
+            GGML_ASSERT(false);
         }
+        // wait for all events
+        CL_CHECK(clFinish(_global_queue));
+        stop_named_timer_and_record("_opencl_mul_mat_mat_q_f32_compute");
     }
 
-    // if (mul_mat_vec) {
-    //     stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_mul_mat_vec");
-    // }
-    // else {
-    //     stop_named_timer_and_record("_opencl_mul_mat_vec_q_f32_mul_mat_mat");
-    // }
 
-    // stop_named_timer_and_record("_opencl_mul_mat_q_f32_compute");
-
-    // LOG(INFO) << "After Compute" << std::endl;
 
     start_named_timer("_opencl_mul_mat_q_f32_mem_free");
+    for (auto *event : events) {
+        clReleaseEvent(event);
+    }
+    events.clear();
     if (!mul_mat_vec) {
         ggml_cl_pool_free(d_X, x_size);
     }
     clReleaseMemObject(d_Y);
     clReleaseMemObject(d_D);
     stop_named_timer_and_record("_opencl_mul_mat_q_f32_mem_free");
-
 }
 
 

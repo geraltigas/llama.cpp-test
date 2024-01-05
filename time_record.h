@@ -7,7 +7,7 @@
 
 #include "./macro.h"
 
-#define ENABLE_TIME_RECORD OFF
+#define ENABLE_TIME_RECORD ON
 
 #ifdef __cplusplus
 extern "C" {
