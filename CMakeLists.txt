@@ -351,18 +351,35 @@ if (LLAMA_CLBLAST)
 #    E:\software\vcpkg\installed\x64-windows\share\clblast
     set(CLBlast_DIR "E:/software/vcpkg/installed/x64-windows/share/clblast")
 #    find_package(CLBlast CONFIG REQUIRED)
-    find_package(CLBlast)
+    find_package(CLBlast CONFIG REQUIRED)
+include_directories("E:/software/oneAPI/compiler/2024.0/include/sycl")
     # E:\software\oneAPI\compiler\2024.0\include\sycl
-    include_directories("E:/software/oneAPI/compiler/2024.0/include/sycl")
-#    import openblas
-    set(OpenBLAS_DIR "E:/software/vcpkg/installed/x64-windows/share/openblas")
-    find_package(OpenBLAS)
-# check OpenBLAS
-    if (OpenBLAS_FOUND)
-        message(STATUS "OpenBLAS found")
+    if (CLBlast_FOUND)
+        message(STATUS "CLBlast found")
+#        E:\software\vcpkg\installed\x64-windows\lib\clblast.lib
+        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} )
     else()
-        message(WARNING "OpenBLAS not found")
+        message(WARNING "CLBlast not found")
     endif()
+# E:\software\vcpkg\installed\x64-windows\share\mkl
+    set(MKL_DIR "E:/software/vcpkg/installed/x64-windows/share/mkl")
+    find_package(MKL CONFIG REQUIRED)
+    if (MKL_FOUND)
+        message(STATUS "MKL found")
+        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} MKL::MKL)
+    else()
+        message(WARNING "MKL not found")
+    endif()
+
+#    import intel mkl E:\software\oneAPI\mkl\2024.0\lib\cmake\mkl
+#    set(OpenBLAS_DIR "E:/software/vcpkg/installed/x64-windows/share/openblas")
+#    find_package(OpenBLAS)
+## check OpenBLAS
+#    if (OpenBLAS_FOUND)
+#        message(STATUS "OpenBLAS found")
+#    else()
+#        message(WARNING "OpenBLAS not found")
+#    endif()
     # E:\software\oneAPI\compiler\2024.0\bin\OpenCL.dll
     #message(STATUS "OpenCL_INCLUDE_DIRS: ${OpenCL_INCLUDE_DIRS}")
     set(GFLAGS_USE_TARGET_NAMESPACE ON)
@@ -383,7 +400,7 @@ if (LLAMA_CLBLAST)
 
         add_compile_definitions(GGML_USE_CLBLAST)
 
-        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} "E:/software/oneAPI/2024.0/lib/OpenCL.lib" clblast glog::glog OpenBLAS::OpenBLAS)
+        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} "E:/software/oneAPI/2024.0/lib/OpenCL.lib" clblast glog::glog )
 
     else()
         message(WARNING "CLBlast not found")

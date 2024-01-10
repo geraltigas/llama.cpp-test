@@ -1,6 +1,5 @@
 #include "ggml.h"
 #include "macro.h"
-#include "macro.h"
 #include "ggml-opencl.h"
 
 #include <array>
@@ -14,6 +13,7 @@
 #include <my_opencl.h>
 #include <time_record.h>
 // glog
+#include <map>
 #include <set>
 #include <glog/logging.h>
 
@@ -22,7 +22,7 @@ extern char *device_name;
 
 // #define CL_TARGET_OPENCL_VERSION 110
 #include <clblast.h>
-#include <cblas.h>
+#include <mkl.h>
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -1117,17 +1117,18 @@ static cl_mem get_matrix_compare_buffer() {
     return clCreateBuffer(_global_context, CL_MEM_USE_HOST_PTR | CL_MEM_READ_WRITE, buffer_size, test_buffer_mem, &err);
 }
 
+static std::map<size_t, cl_mem> g_cl_pool;
+
 static cl_mem ggml_cl_pool_malloc(size_t size) {
-    scoped_spin_lock lock(g_cl_pool_lock);
     cl_int err;
 
     if (size > buffer_size)
     {
-        // free buffer_mem use clib
+        // resize buffer_mem
         free(buffer_mem);
-        // malloc new buffer_mem
         buffer_mem = malloc(size);
         buffer_size = size;
+        LOG(INFO) << "malloc new buffer_mem size: " << size;
         // create cl_mem
         cl_mem mem = clCreateBuffer(_global_context, CL_MEM_USE_HOST_PTR | CL_MEM_READ_WRITE, size, buffer_mem, &err);
         if (err != CL_SUCCESS) {
@@ -1745,7 +1746,7 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
         float* d_D_cpu = static_cast<float*>(dst->data);  // Pointer to d_D in CPU memory
 
         // First part with CLBlast
-        int split_point = static_cast<int>(ne00 * split_ratio);
+        int split_point = static_cast<int>(ne01 * split_ratio);
 
         // const clblast::StatusCode status = clblast::Gemm<cl_float>(clblast::Layout::kColMajor,
         //                                                            clblast::Transpose::kYes, clblast::Transpose::kNo,
@@ -1758,7 +1759,10 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
         //                                                            &_global_queue, events.data() + ev_idx++);
 
         if (split_point > 0) {
+
+#if TEST_LOG
             LOG(INFO) << "run clblast gemm" << std::endl;
+#endif
             clblast::StatusCode status = clblast::Gemm<cl_float>(
                 clblast::Layout::kColMajor,
                 clblast::Transpose::kYes, clblast::Transpose::kNo,
@@ -1774,30 +1778,40 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
             }
         }
 
-
-        // Second part with OpenBLAS
-        int m = ne01 - split_point;
-        int k = ne10;
-        int n = ne11;
-
         float* d_X_part2 = d_X_cpu + split_point * ne00;
-        float* d_D_part2 = d_D_cpu + split_point * ne01;
+        float* d_D_part2 = d_D_cpu + split_point;
 
-        if (m > 0) {
+        if (ne01 - split_point > 0) {
+#if TEST_LOG
             LOG(INFO) << "run openblas gemm" << std::endl;
-            cblas_sgemm(CblasColMajor, CblasTrans, CblasNoTrans,
-                        m, n, k,
-                        alpha,
-                        d_X_part2, ne00,
-                        d_Y_cpu, ne10,
-                        beta,
-                        d_D_part2, ne01);
+#endif
+            // cblas_sgemm(CblasColMajor, CblasTrans, CblasNoTrans,
+            //             ne01 - split_point, ne10, ne11,
+            //             alpha,
+            //             d_X_part2, ne00,
+            //             d_Y_cpu, ne10,
+            //             beta,
+            //             d_D_part2, ne01);
+            events.emplace_back();
+            const clblast::StatusCode _status = clblast::Gemm<cl_float>(clblast::Layout::kColMajor,
+                                                                   clblast::Transpose::kYes, clblast::Transpose::kNo,
+                                                                     ne01 - split_point, ne11, ne10,
+                                                                   alpha,
+                                                                   d_X, split_point * ne00, ne00,
+                                                                   d_Y, 0, ne10,
+                                                                   beta,
+                                                                   d_D, split_point, ne01,
+                                                                   &_global_queue, events.data() + ev_idx++);
+            if (_status != clblast::StatusCode::kSuccess) {
+                GGML_ASSERT(false);
+            }
         }
 
         CL_CHECK(clFinish(_global_queue));
 
 #if ENABLE_MATRIX_COMPARE
         cl_mem _d_D = get_matrix_compare_buffer();
+        events.emplace_back();
         const clblast::StatusCode _status = clblast::Gemm<cl_float>(clblast::Layout::kColMajor,
                                                                clblast::Transpose::kYes, clblast::Transpose::kNo,
                                                                ne01, ne11, ne10,
@@ -1810,6 +1824,7 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
         if (_status != clblast::StatusCode::kSuccess) {
             GGML_ASSERT(false);
         }
+        CL_CHECK(clFinish(_global_queue));
         bool equal = compare_matrix(d_D,_d_D, sizeof(float) * d_ne);
         if (!equal) {
             fprintf(stderr, "ggml_opencl: clblast&openblas and clblast results are not equal\n");

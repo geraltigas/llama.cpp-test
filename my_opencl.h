@@ -10,7 +10,7 @@
 
 
 #define ENABLE_MATRIX_COMPARE ON
-#define SPLIT_RATIO 1 // gpu / cpu + gpu
+#define SPLIT_RATIO 0.5 // gpu / cpu + gpu
 
 extern bool fp16_support;
 extern bool unified_memory_support;
