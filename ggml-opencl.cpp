@@ -1647,6 +1647,9 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     const int64_t ne10 = src1->ne[0];
     const int64_t ne11 = src1->ne[1];
 
+    const int64_t ne20  = dst->ne[0];
+    const int64_t ne21  = dst->ne[1];
+
     // format the size of the two matrixs {ne00, ne01} * {ne10, ne11}
     const std::string size_str = "{" + std::to_string(ne01) + ", " + std::to_string(ne00) + "} * {" + std::to_string(ne10) + ", " + std::to_string(ne11) + "}";
     _self_increase_statistic("GEMM", size_str.c_str());
