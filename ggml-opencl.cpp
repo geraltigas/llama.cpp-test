@@ -1744,6 +1744,16 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
         // First part with CLBlast
         int split_point = static_cast<int>(ne00 * split_ratio);
 
+        // const clblast::StatusCode status = clblast::Gemm<cl_float>(clblast::Layout::kColMajor,
+        //                                                            clblast::Transpose::kYes, clblast::Transpose::kNo,
+        //                                                            ne01, ne11, ne10,
+        //                                                            alpha,
+        //                                                            d_X, 0, ne00,
+        //                                                            d_Y, 0, ne10,
+        //                                                            beta,
+        //                                                            d_D, 0, ne01,
+        //                                                            &_global_queue, events.data() + ev_idx++);
+
         if (split_point > 0) {
             LOG(INFO) << "run clblast gemm" << std::endl;
             clblast::StatusCode status = clblast::Gemm<cl_float>(
