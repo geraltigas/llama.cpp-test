@@ -1,7 +1,6 @@
 //
 // Created by jb030 on 28/12/2023.
 //
-#define GLOG_NO_ABBREVIATED_SEVERITIES
 #include <cstdlib>
 #include <iostream>
 #include <map>
@@ -110,12 +109,9 @@ void print_now_using() {
 
 void check_unified_memory_support() {
     cl_bool unifiedMemory;
-    cl_int err;
 
-    // 获取设备的统一内存属性
-    err = clGetDeviceInfo(_global_device, CL_DEVICE_HOST_UNIFIED_MEMORY, sizeof(cl_bool), &unifiedMemory, NULL);
+    cl_int err = clGetDeviceInfo(_global_device, CL_DEVICE_HOST_UNIFIED_MEMORY, sizeof(cl_bool), &unifiedMemory, NULL);
     if (err != CL_SUCCESS) {
-        // 错误处理
         printf("Error getting device info: %d\n", err);
         unified_memory_support = false;
     }else {
@@ -297,30 +293,24 @@ void build_all_kernels() {
 // }
 
 bool compare_matrix(cl_mem x, cl_mem _x,size_t size) {
-    // cl_kernel compare_matrix_cl = get_kernel("compare_matrices");
-    // clSetKernelArg(compare_matrix_cl, 0, sizeof(cl_mem), &x);
-    // clSetKernelArg(compare_matrix_cl, 1, sizeof(cl_mem), &_x);
-    // cl_mem result = create_buffer(buffer_type::WRITE_ONLY, sizeof(bool), nullptr);
-    // clSetKernelArg(compare_matrix_cl, 2, sizeof(cl_mem), &result);
-    // clSetKernelArg(compare_matrix_cl, 3, sizeof(size_t), &rows);
-    // clSetKernelArg(compare_matrix_cl, 4, sizeof(size_t), &cols);
-    // size_t global = rows * cols;
-    // size_t local = 0;
-    // size_t offset = 0;
-    // cl_int err = clEnqueueNDRangeKernel(_global_queue, compare_matrix_cl, 1, &offset, &global, local > 0 ? &local : NULL, 0, NULL, NULL);
-    // CHECK_ERROR(err, "Failed to run kernel")
-    // bool* host_ptr = (bool *)malloc(sizeof(bool));
-    // read_buffer(result, sizeof(bool), host_ptr);
-
-    byte* host_ptr = (byte *)malloc(size);
-    byte* _host_ptr = (byte *)malloc(size);
+    LOG(INFO) << "compare_matrix" << std::endl;
+    // check mem validation
+    auto* host_ptr = static_cast<float*>(malloc(size));
+    auto* _host_ptr = static_cast<float*>(malloc(size));
+    for (int i = 0; i < size / sizeof(float); i++) {
+        host_ptr[i] = host_ptr[i];
+        _host_ptr[i] = _host_ptr[i];
+    }
+    LOG(INFO) << "mem validation passed" << std::endl;
     read_buffer(x, size, host_ptr);
     read_buffer(_x, size, _host_ptr);
+    size = size / sizeof(float);
     for (int i = 0; i < size; i++) {
         if (host_ptr[i] != _host_ptr[i]) {
             return false;
         }
     }
+    LOG(INFO) << "compare_matrix passed" << std::endl;
     return true;
 }
 

@@ -6,9 +6,11 @@
 #include "./macro.h"
 #ifndef PRINT_INFO_H
 
+#define CL_TARGET_OPENCL_VERSION 300
 
 
-#define ENABLE_MATRIX_COMPARE OFF
+#define ENABLE_MATRIX_COMPARE ON
+#define SPLIT_RATIO 1 // gpu / cpu + gpu
 
 extern bool fp16_support;
 extern bool unified_memory_support;

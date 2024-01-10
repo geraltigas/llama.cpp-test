@@ -1083,9 +1083,38 @@ static std::atomic_flag g_cl_pool_lock = ATOMIC_FLAG_INIT;
 
 static void* buffer_mem = nullptr;
 static size_t buffer_size = 0;
+static void* test_buffer_mem = nullptr;
+static size_t test_buffer_size = 0;
+
 
 static void* get_buffer_mem_ptr() {
     return buffer_mem;
+}
+
+static cl_mem get_matrix_compare_buffer() {
+    cl_int err;
+    if (test_buffer_size < buffer_size) {
+        // free buffer_mem use clib
+        free(test_buffer_mem);
+        // malloc new buffer_mem
+        test_buffer_mem = malloc(buffer_size);
+        test_buffer_size = buffer_size;
+        // create cl_mem
+        cl_mem mem = clCreateBuffer(_global_context, CL_MEM_USE_HOST_PTR | CL_MEM_READ_WRITE, buffer_size, test_buffer_mem, &err);
+        if (err != CL_SUCCESS) {
+            fprintf(stderr, "ggml_opencl: clCreateBuffer error %d at %s:%d\n", err, __FILE__, __LINE__);
+            // get the error string
+            size_t len;
+            clGetProgramBuildInfo(program, _global_device, CL_PROGRAM_BUILD_LOG, 0, NULL, &len);
+            char *buffer = (char *)malloc(len);
+            clGetProgramBuildInfo(program, _global_device, CL_PROGRAM_BUILD_LOG, len, buffer, NULL);
+            fprintf(stderr, "%s\n", buffer);
+            free(buffer);
+            exit(1);
+        }
+        return mem;
+    }
+    return clCreateBuffer(_global_context, CL_MEM_USE_HOST_PTR | CL_MEM_READ_WRITE, buffer_size, test_buffer_mem, &err);
 }
 
 static cl_mem ggml_cl_pool_malloc(size_t size) {
@@ -1699,7 +1728,7 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
         constexpr float alpha = 1.0f;
 
         // split computation into cpu and gpu, split src0 into two parts
-        constexpr float split_ratio = 0.6f; // cpu / cpu + gpu
+        constexpr float split_ratio = SPLIT_RATIO; // gpu / cpu + gpu
 
         d_D = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * d_ne, static_cast<char*>(dst->data));
         d_Y = ggml_cl_h2d_tensor_2d_with_unified_mem(src1, 0);
@@ -1715,19 +1744,23 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
         // First part with CLBlast
         int split_point = static_cast<int>(ne00 * split_ratio);
 
-        clblast::StatusCode status = clblast::Gemm<cl_float>(
-            clblast::Layout::kColMajor,
-            clblast::Transpose::kYes, clblast::Transpose::kNo,
-            split_point, ne11, ne10,
-            alpha,
-            d_X, 0, ne00,
-            d_Y, 0, ne10,
-            beta,
-            d_D, 0, ne01,
-            &_global_queue, &events[ev_idx++]);
-        if (status != clblast::StatusCode::kSuccess) {
-            // Handle error
+        if (split_point > 0) {
+            LOG(INFO) << "run clblast gemm" << std::endl;
+            clblast::StatusCode status = clblast::Gemm<cl_float>(
+                clblast::Layout::kColMajor,
+                clblast::Transpose::kYes, clblast::Transpose::kNo,
+                split_point, ne11, ne10,
+                alpha,
+                d_X, 0, ne00,
+                d_Y, 0, ne10,
+                beta,
+                d_D, 0, ne01,
+                &_global_queue, &events[ev_idx++]);
+            if (status != clblast::StatusCode::kSuccess) {
+                GGML_ASSERT(false);
+            }
         }
+
 
         // Second part with OpenBLAS
         int m = ne01 - split_point;
@@ -1737,17 +1770,44 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
         float* d_X_part2 = d_X_cpu + split_point * ne00;
         float* d_D_part2 = d_D_cpu + split_point * ne01;
 
-        cblas_sgemm(CblasColMajor, CblasTrans, CblasNoTrans,
-                    m, n, k,
-                    alpha,
-                    d_X_part2, ne00,
-                    d_Y_cpu, ne10,
-                    beta,
-                    d_D_part2, ne01);
+        if (m > 0) {
+            LOG(INFO) << "run openblas gemm" << std::endl;
+            cblas_sgemm(CblasColMajor, CblasTrans, CblasNoTrans,
+                        m, n, k,
+                        alpha,
+                        d_X_part2, ne00,
+                        d_Y_cpu, ne10,
+                        beta,
+                        d_D_part2, ne01);
+        }
 
         CL_CHECK(clFinish(_global_queue));
+
+#if ENABLE_MATRIX_COMPARE
+        cl_mem _d_D = get_matrix_compare_buffer();
+        const clblast::StatusCode _status = clblast::Gemm<cl_float>(clblast::Layout::kColMajor,
+                                                               clblast::Transpose::kYes, clblast::Transpose::kNo,
+                                                               ne01, ne11, ne10,
+                                                               alpha,
+                                                               d_X, 0, ne00,
+                                                               d_Y, 0, ne10,
+                                                               beta,
+                                                               _d_D, 0, ne01,
+                                                               &_global_queue, events.data() + ev_idx++);
+        if (_status != clblast::StatusCode::kSuccess) {
+            GGML_ASSERT(false);
+        }
+        bool equal = compare_matrix(d_D,_d_D, sizeof(float) * d_ne);
+        if (!equal) {
+            fprintf(stderr, "ggml_opencl: clblast&openblas and clblast results are not equal\n");
+            exit(1);
+        }
+#endif
+
         stop_named_timer_and_record("_opencl_kernel_mul_mat_mat_q_f32_compute");
     }
+
+
 
 
 
