@@ -14,6 +14,7 @@
 #include <my_opencl.h>
 #include <time_record.h>
 // glog
+#include <set>
 #include <glog/logging.h>
 
 extern char *platform_name;
@@ -21,6 +22,7 @@ extern char *device_name;
 
 // #define CL_TARGET_OPENCL_VERSION 110
 #include <clblast.h>
+#include <cblas.h>
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -1079,6 +1081,43 @@ struct cl_buffer {
 static cl_buffer g_cl_buffer_pool[MAX_CL_BUFFERS];
 static std::atomic_flag g_cl_pool_lock = ATOMIC_FLAG_INIT;
 
+static void* buffer_mem = nullptr;
+static size_t buffer_size = 0;
+
+static void* get_buffer_mem_ptr() {
+    return buffer_mem;
+}
+
+static cl_mem ggml_cl_pool_malloc(size_t size) {
+    scoped_spin_lock lock(g_cl_pool_lock);
+    cl_int err;
+
+    if (size > buffer_size)
+    {
+        // free buffer_mem use clib
+        free(buffer_mem);
+        // malloc new buffer_mem
+        buffer_mem = malloc(size);
+        buffer_size = size;
+        // create cl_mem
+        cl_mem mem = clCreateBuffer(_global_context, CL_MEM_USE_HOST_PTR | CL_MEM_READ_WRITE, size, buffer_mem, &err);
+        if (err != CL_SUCCESS) {
+            fprintf(stderr, "ggml_opencl: clCreateBuffer error %d at %s:%d\n", err, __FILE__, __LINE__);
+            // get the error string
+            size_t len;
+            clGetProgramBuildInfo(program, _global_device, CL_PROGRAM_BUILD_LOG, 0, NULL, &len);
+            char *buffer = (char *)malloc(len);
+            clGetProgramBuildInfo(program, _global_device, CL_PROGRAM_BUILD_LOG, len, buffer, NULL);
+            fprintf(stderr, "%s\n", buffer);
+            free(buffer);
+            exit(1);
+        }
+        return mem;
+    }
+
+    return clCreateBuffer(_global_context, CL_MEM_USE_HOST_PTR | CL_MEM_READ_WRITE, size, buffer_mem, &err);
+}
+
 static cl_mem ggml_cl_pool_malloc(size_t size, size_t * actual_size) {
     scoped_spin_lock lock(g_cl_pool_lock);
     cl_int err;
@@ -1114,9 +1153,10 @@ static cl_mem ggml_cl_pool_malloc(size_t size, size_t * actual_size) {
          cl_mem mem = b.mem;
          b.size = 0;
          clReleaseMemObject(mem);
+        // free the memory allocated
     }
     cl_mem mem;
-    CL_CHECK((mem = clCreateBuffer(_global_context, CL_MEM_READ_WRITE, size, NULL, &err), err));
+    CL_CHECK((mem = clCreateBuffer(_global_context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, size, NULL, &err), err));
     *actual_size = size;
     return mem;
 }
@@ -1243,22 +1283,39 @@ static cl_int ggml_cl_h2d_tensor_2d(cl_command_queue queue, cl_mem dst, size_t o
     return CL_SUCCESS;
 }
 
-static cl_mem ggml_cl_h2d_tensor_2d_with_unified_mem(size_t offset, const ggml_tensor * src, uint64_t i3, uint64_t i2) {
+static cl_mem ggml_cl_h2d_tensor_2d_with_unified_mem(const ggml_tensor * src, size_t offset) {
     const uint64_t ne0 = src->ne[0];
     const uint64_t ne1 = src->ne[1];
-    const uint64_t nb2 = src->nb[2];
-    const uint64_t nb3 = src->nb[3];
     const enum ggml_type type = src->type;
     const size_t ts = ggml_type_size(type);
     const size_t bs = ggml_blck_size(type);
     const uint64_t row_size = ts*ne0/bs;
     cl_int err = CL_SUCCESS;
 
-    const char * x = (const char *) src->data + i2*nb2 + i3*nb3;
+    const char * x = (const char *) src->data;
     size_t size = row_size * ne1;
     const char * start_ptr = x + offset;
     cl_mem_flags mem_flags = CL_MEM_USE_HOST_PTR | CL_MEM_READ_WRITE;
     const cl_mem new_dst = clCreateBuffer(_global_context, mem_flags, size, (void *)start_ptr, &err);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "ggml_opencl: clCreateBuffer error %d at %s:%d\n", err, __FILE__, __LINE__);
+        // get the error string
+        size_t len;
+        clGetProgramBuildInfo(program, _global_device, CL_PROGRAM_BUILD_LOG, 0, NULL, &len);
+        char *buffer = (char *)malloc(len);
+        clGetProgramBuildInfo(program, _global_device, CL_PROGRAM_BUILD_LOG, len, buffer, NULL);
+        fprintf(stderr, "%s\n", buffer);
+        free(buffer);
+        exit(1);
+    }
+    return new_dst;
+}
+
+static cl_mem ggml_cl_h2d_tensor_2d_with_unified_mem(const void * ptr, size_t offset, size_t size)
+{
+    cl_int err = CL_SUCCESS;
+    cl_mem_flags mem_flags = CL_MEM_USE_HOST_PTR | CL_MEM_READ_WRITE;
+    const cl_mem new_dst = clCreateBuffer(_global_context, mem_flags, size, (void *)ptr, &err);
     if (err != CL_SUCCESS) {
         fprintf(stderr, "ggml_opencl: clCreateBuffer error %d at %s:%d\n", err, __FILE__, __LINE__);
         // get the error string
@@ -1562,7 +1619,7 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     const int64_t ne11 = src1->ne[1];
 
     // format the size of the two matrixs {ne00, ne01} * {ne10, ne11}
-    const std::string size_str = "{" + std::to_string(ne00) + ", " + std::to_string(ne01) + "} * {" + std::to_string(ne10) + ", " + std::to_string(ne11) + "}";
+    const std::string size_str = "{" + std::to_string(ne01) + ", " + std::to_string(ne00) + "} * {" + std::to_string(ne10) + ", " + std::to_string(ne11) + "}";
     _self_increase_statistic("GEMM", size_str.c_str());
 
     const ggml_type type = src0->type;
@@ -1574,11 +1631,7 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     stop_named_timer_and_record("_opencl_mul_mat_q_f32_init");
 
     start_named_timer("_opencl_mul_mat_q_f32_mem_alloc");
-    size_t x_size;
-    cl_mem d_X;
-    if (!mul_mat_vec) {
-        d_X = ggml_cl_pool_malloc(sizeof(float) * x_ne, &x_size);
-    }
+    cl_mem d_X = ggml_cl_pool_malloc(sizeof(float) * x_ne);
     cl_mem d_Y;
     cl_mem d_D;
 
@@ -1613,11 +1666,12 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
     }
 
     // wait for conversion
-    d_D = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * d_ne, (float *) ((char *) dst->data));
-    d_Y = ggml_cl_h2d_tensor_2d_with_unified_mem(0, src1, 0, 0);
+
 
     if (mul_mat_vec) { // specialized dequantize_mul_mat_vec kernel
         // compute
+        d_D = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * d_ne, static_cast<char*>(dst->data));
+        d_Y = ggml_cl_h2d_tensor_2d_with_unified_mem(src1,0);
         start_named_timer("_opencl_kernel_mul_mat_vec_q_f32_compute");
         const size_t global = ne01 * local;
         const cl_int ncols = ne00;
@@ -1643,22 +1697,54 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
         size_t ev_idx = 0;
         constexpr float beta = 0.0f;
         constexpr float alpha = 1.0f;
-        // compute
-        events.emplace_back();
-        const clblast::StatusCode status = clblast::Gemm<cl_float>(clblast::Layout::kColMajor,
-                                                                   clblast::Transpose::kYes, clblast::Transpose::kNo,
-                                                                   ne01, ne11, ne10,
-                                                                   alpha,
-                                                                   d_X, 0, ne00,
-                                                                   d_Y, 0, ne10,
-                                                                   beta,
-                                                                   d_D, 0, ne01,
-                                                                   &_global_queue, events.data() + ev_idx++);
 
+        // split computation into cpu and gpu, split src0 into two parts
+        constexpr float split_ratio = 0.6f; // cpu / cpu + gpu
+
+        d_D = ggml_cl_pool_malloc_with_unified_mem(sizeof(float) * d_ne, static_cast<char*>(dst->data));
+        d_Y = ggml_cl_h2d_tensor_2d_with_unified_mem(src1, 0);
+
+        // get raw ptr from buffer d_X
+
+        events.emplace_back();
+        // Assuming d_X, d_Y, and d_D are allocated in unified memory
+        float* d_X_cpu = static_cast<float*>(get_buffer_mem_ptr());;  // Pointer to d_X in CPU memory
+        float* d_Y_cpu = static_cast<float*>(src1->data);  // Pointer to d_Y in CPU memory
+        float* d_D_cpu = static_cast<float*>(dst->data);  // Pointer to d_D in CPU memory
+
+        // First part with CLBlast
+        int split_point = static_cast<int>(ne00 * split_ratio);
+
+        clblast::StatusCode status = clblast::Gemm<cl_float>(
+            clblast::Layout::kColMajor,
+            clblast::Transpose::kYes, clblast::Transpose::kNo,
+            split_point, ne11, ne10,
+            alpha,
+            d_X, 0, ne00,
+            d_Y, 0, ne10,
+            beta,
+            d_D, 0, ne01,
+            &_global_queue, &events[ev_idx++]);
         if (status != clblast::StatusCode::kSuccess) {
-            GGML_ASSERT(false);
+            // Handle error
         }
-        // wait for all events
+
+        // Second part with OpenBLAS
+        int m = ne01 - split_point;
+        int k = ne10;
+        int n = ne11;
+
+        float* d_X_part2 = d_X_cpu + split_point * ne00;
+        float* d_D_part2 = d_D_cpu + split_point * ne01;
+
+        cblas_sgemm(CblasColMajor, CblasTrans, CblasNoTrans,
+                    m, n, k,
+                    alpha,
+                    d_X_part2, ne00,
+                    d_Y_cpu, ne10,
+                    beta,
+                    d_D_part2, ne01);
+
         CL_CHECK(clFinish(_global_queue));
         stop_named_timer_and_record("_opencl_kernel_mul_mat_mat_q_f32_compute");
     }
@@ -1670,9 +1756,7 @@ static void ggml_cl_mul_mat_q_f32(const ggml_tensor * src0, const ggml_tensor * 
         clReleaseEvent(event);
     }
     events.clear();
-    if (!mul_mat_vec) {
-        ggml_cl_pool_free(d_X, x_size);
-    }
+    clReleaseMemObject(d_X);
     clReleaseMemObject(d_Y);
     clReleaseMemObject(d_D);
     stop_named_timer_and_record("_opencl_mul_mat_q_f32_mem_free");

@@ -354,6 +354,15 @@ if (LLAMA_CLBLAST)
     find_package(CLBlast)
     # E:\software\oneAPI\compiler\2024.0\include\sycl
     include_directories("E:/software/oneAPI/compiler/2024.0/include/sycl")
+#    import openblas
+    set(OpenBLAS_DIR "E:/software/vcpkg/installed/x64-windows/share/openblas")
+    find_package(OpenBLAS)
+# check OpenBLAS
+    if (OpenBLAS_FOUND)
+        message(STATUS "OpenBLAS found")
+    else()
+        message(WARNING "OpenBLAS not found")
+    endif()
     # E:\software\oneAPI\compiler\2024.0\bin\OpenCL.dll
     #message(STATUS "OpenCL_INCLUDE_DIRS: ${OpenCL_INCLUDE_DIRS}")
     set(GFLAGS_USE_TARGET_NAMESPACE ON)
@@ -374,7 +383,7 @@ if (LLAMA_CLBLAST)
 
         add_compile_definitions(GGML_USE_CLBLAST)
 
-        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} "E:/software/oneAPI/2024.0/lib/OpenCL.lib" clblast glog::glog)
+        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} "E:/software/oneAPI/2024.0/lib/OpenCL.lib" clblast glog::glog OpenBLAS::OpenBLAS)
 
     else()
         message(WARNING "CLBlast not found")
